@@ -389,3 +389,78 @@ async def delete_approver(
         await session.delete(row)
         await session.commit()
     return Response(status_code=204)
+
+
+# ---- Users (LDAP admin group + bootstrap admin = is_superuser) -----------
+
+def _user_json(row: User) -> dict[str, Any]:
+    last = row.last_login_at
+    created = row.created_at
+    return {
+        "id": str(row.id),
+        "username": row.username,
+        "email": row.email,
+        "display_name": row.display_name,
+        "is_superuser": row.is_superuser,
+        "is_active": row.is_active,
+        "is_ldap": bool(row.ldap_dn),
+        "last_login_at": last.isoformat() if last is not None else None,
+        "created_at": created.isoformat() if created is not None else None,
+    }
+
+
+def _bootstrap_username(request: Request) -> str:
+    state: AppState = request.app.state.container
+    return (state.settings.bootstrap_admin_username or "").strip()
+
+
+class UserPatchBody(BaseModel):
+    is_superuser: bool | None = None
+    is_active: bool | None = None
+
+
+@router.get("/users")
+async def list_users(
+    request: Request,
+    _user: Annotated[User, Depends(get_current_superuser)],
+) -> JSONResponse:
+    state: AppState = request.app.state.container
+    async with state.session_factory() as session:
+        rows = (
+            await session.execute(
+                select(User).order_by(User.is_superuser.desc(), User.username.asc())
+            )
+        ).scalars().all()
+    return JSONResponse(content=[_user_json(row) for row in rows])
+
+
+@router.patch("/users/{user_id}")
+async def patch_user(
+    request: Request,
+    user_id: UUID,
+    body: UserPatchBody,
+    actor: Annotated[User, Depends(get_current_superuser)],
+) -> JSONResponse:
+    if body.is_superuser is None and body.is_active is None:
+        return JSONResponse(status_code=422, content={"error_code": "EMPTY_PATCH"})
+    bootstrap = _bootstrap_username(request)
+    state: AppState = request.app.state.container
+    async with state.session_factory() as session:
+        row = await session.get(User, user_id)
+        if row is None:
+            return JSONResponse(status_code=404, content={"error_code": "NOT_FOUND"})
+        if row.username == bootstrap or row.id == actor.id:
+            demote = body.is_superuser is False or body.is_active is False
+            if demote:
+                return JSONResponse(
+                    status_code=409,
+                    content={"error_code": "PROTECTED_ACCOUNT"},
+                )
+        if body.is_superuser is not None:
+            row.is_superuser = body.is_superuser
+        if body.is_active is not None:
+            row.is_active = body.is_active
+        await session.commit()
+        await session.refresh(row)
+        return JSONResponse(content=_user_json(row))
+

@@ -1,17 +1,7 @@
-"""Worker + dispatcher log format normalization.
+"""Worker + API log format.
 
-Tek bir JSON line üretir; `extra=` ile verilen tüm struct field'lar
-flat çıkar. `correlation_id` kaydını 3 yerden dener:
-
-1. ``LogRecord.correlation_id`` (eğer caller ``extra={"correlation_id":
-   ...}`` geçtiyse)
-2. ``logging.LoggerAdapter`` üzerinden ``context_correlation_id``
-3. ``LOG_CORRELATION_ID`` env (smoke'sız, container-job'i varsa)
-
-NOT: Python 3.14'te ``logger.warning(msg % args, extra=dict)`` artık
-``%``-format pitfall'u taşır; caller'lar ya lazy ``logger.warning(...
-extra={...})`` ya da ``logger.info("... %s", value, extra={...})``
-biçimi kullanır. Bu formatter her iki stili de kabul eder.
+Varsayılan: tek satır console (docker logs okunaklı).
+``LOG_FORMAT=json`` eski JSON line. LiteLLM satırları kırmızı.
 """
 
 from __future__ import annotations
@@ -20,6 +10,7 @@ import datetime as _dt
 import json
 import logging
 import os
+import sys
 from typing import Any
 
 try:
@@ -36,7 +27,6 @@ def set_correlation_id(value: str | None) -> None:
     if not _CONTEXTVARS_ENABLED:
         return
     if value is None:
-        # Eksplicit reset — çağıran taraf sızıntı istemiyorsa.
         _CORRELATION_ID.set(None)
         return
     _CORRELATION_ID.set(value)
@@ -64,19 +54,41 @@ def _to_jsonable(value: Any) -> Any:
     return str(value)
 
 
-class JsonLogFormatter(logging.Formatter):
-    """Her kaydı tek-satır JSON olarak basar.
+_RED = "\033[31m"
+_YELLOW = "\033[33m"
+_GREEN = "\033[32m"
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
 
-    Output alanları (stable contract):
-      - ts (ISO-8601 UTC, "Z" suffix)
-      - level
-      - logger
-      - message
-      - correlation_id (varsa)
-      - module/func/lineno
-      - extras: caller'ın ``extra=`` ile gönderdiği tüm struct field'lar
-      - exc_info: varsa ``{"type": ..., "message": ..., "traceback": ...}``
-    """
+_LITELLM_HINTS = (
+    "litellm",
+    "/key/generate",
+    "/mcp/keys",
+    "provision:litellm",
+)
+
+
+def _color_enabled() -> bool:
+    if os.getenv("NO_COLOR"):
+        return False
+    flag = (os.getenv("LOG_COLOR") or "1").strip().lower()
+    return flag not in {"0", "false", "no", "off"}
+
+
+def _is_litellm_record(record: logging.LogRecord) -> bool:
+    blob = " ".join((
+        record.name,
+        record.getMessage(),
+        str(getattr(record, "event", "")),
+        str(getattr(record, "job_type", "")),
+        str(getattr(record, "kind", "")),
+    )).lower()
+    return any(hint in blob for hint in _LITELLM_HINTS)
+
+
+class JsonLogFormatter(logging.Formatter):
+    """Her kaydı tek-satır JSON olarak basar (LOG_FORMAT=json)."""
 
     RESERVED = frozenset({
         "name", "msg", "args", "levelname", "levelno", "pathname",
@@ -131,28 +143,87 @@ class JsonLogFormatter(logging.Formatter):
         return {"type": "Unknown", "message": "", "traceback": ""}
 
 
-def configure_json_logging(level: int = logging.INFO) -> None:
-    """Yapılandırma: kök logger'a ``JsonLogFormatter`` bağla.
+class ConsoleLogFormatter(logging.Formatter):
+    """Docker/TTY: ``21:04:15  INFO  worker  başladı``."""
 
-    Birden fazla kez çağrılırsa idempotent davranır (mükerrer handler
-    eklenmez).
+    _KEEP_EXTRA = (
+        "event", "job_id", "job_type", "final_status", "error_code",
+        "request_id", "status", "kind",
+    )
+
+    def format(self, record: logging.LogRecord) -> str:
+        ts = _dt.datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+        logger_name = record.name.rsplit(".", 1)[-1]
+        msg = record.getMessage()
+        bits = [f"{ts}", f"{record.levelname:<5}", f"{logger_name:<12}", msg]
+        extra_parts: list[str] = []
+        for key in self._KEEP_EXTRA:
+            value = getattr(record, key, None)
+            if value not in (None, "", []):
+                extra_parts.append(f"{key}={value}")
+        if extra_parts:
+            bits.append(" ".join(extra_parts))
+        if record.exc_info:
+            bits.append(self.formatException(record.exc_info).replace("\n", " | "))
+        line = "  ".join(bits)
+        if not _color_enabled():
+            return line
+        litellm = _is_litellm_record(record)
+        if litellm or record.levelno >= logging.ERROR:
+            return f"{_BOLD}{_RED}{line}{_RESET}"
+        if record.levelno >= logging.WARNING:
+            return f"{_YELLOW}{line}{_RESET}"
+        if record.levelno <= logging.DEBUG:
+            return f"{_DIM}{line}{_RESET}"
+        return f"{_GREEN}{line}{_RESET}"
+
+
+def _quiet_noisy_loggers() -> None:
+    for name in (
+        "httpx",
+        "httpcore",
+        "urllib3",
+        "asyncio",
+        "multipart",
+        "sqlalchemy.engine",
+        "sqlalchemy.pool",
+        "uvicorn.access",
+    ):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def configure_json_logging(level: int = logging.INFO) -> None:
+    """Kök logger. Varsayılan console; ``LOG_FORMAT=json`` JSON line.
+
+    Birden fazla kez çağrılırsa idempotent (mükerrer handler eklenmez).
     """
     root = logging.getLogger()
-    if any(
-        getattr(h, "_is_genai_json_handler", False)
-        for h in root.handlers
-    ):
+    fmt_name = (os.getenv("LOG_FORMAT") or "console").strip().lower()
+    formatter: logging.Formatter = (
+        JsonLogFormatter() if fmt_name == "json" else ConsoleLogFormatter()
+    )
+
+    existing = [
+        h for h in root.handlers
+        if getattr(h, "_is_genai_json_handler", False)
+    ]
+    if existing:
+        for handler in existing:
+            handler.setFormatter(formatter)
         root.setLevel(level)
+        _quiet_noisy_loggers()
         return
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(JsonLogFormatter())
+    handler = logging.StreamHandler(stream=sys.stderr)
+    handler.setFormatter(formatter)
     handler._is_genai_json_handler = True  # type: ignore[attr-defined]
     root.addHandler(handler)
     root.setLevel(level)
+    _quiet_noisy_loggers()
 
 
 __all__ = [
+    "ConsoleLogFormatter",
     "JsonLogFormatter",
     "configure_json_logging",
     "set_correlation_id",

@@ -26,6 +26,7 @@ from .dependencies import WorkerDependencies
 from .errors import PermanentError, RetryHeld
 
 logger = logging.getLogger(__name__)
+litellm_log = logging.getLogger("genai.litellm")
 
 # Domain enum (`OutboxJobType`) editable-install break yüzünden
 # bu turda import edilemiyor (packages/genai-orion-panel-core yolu
@@ -413,6 +414,11 @@ async def _provision_credential(
             "request_id": str(request_id),
             "ticket": row.genai_orion_panel_ticket_id,
         }
+        litellm_log.info(
+            "LiteLLM POST %s",
+            url,
+            extra={"kind": kind, "request_id": str(request_id)},
+        )
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 if kind == "litellm":
@@ -444,7 +450,17 @@ async def _provision_credential(
                     json=body,
                 )
         except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
+            litellm_log.error(
+                "LiteLLM unreachable %s: %s",
+                url, exc,
+                extra={"kind": kind, "request_id": str(request_id)},
+            )
             raise RetryHeld(f"{kind} unavailable: {exc}") from exc
+        litellm_log.info(
+            "LiteLLM %s → HTTP %s",
+            url, response.status_code,
+            extra={"kind": kind, "request_id": str(request_id), "status": response.status_code},
+        )
         if response.status_code in {429, 502, 503, 504}:
             raise RetryHeld(f"{kind} http {response.status_code}")
         if response.status_code in {400, 401, 403}:

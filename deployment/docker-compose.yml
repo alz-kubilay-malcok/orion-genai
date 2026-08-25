@@ -183,3 +183,9 @@ volumes:
 networks:
   default:
     name: genai-orion-panel-net
+ 
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.50.60.0/24
+          gateway: 10.50.60.1

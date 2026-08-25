@@ -292,6 +292,41 @@ export async function deleteApprover(id: string): Promise<void> {
   if (!res.ok) throw new Error("Silinemedi");
 }
 
+// ---- Users (LDAP admin group + bootstrap admin) -------------------------
+
+export const adminUserItemSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  email: z.string(),
+  display_name: z.string().nullable(),
+  is_superuser: z.boolean(),
+  is_active: z.boolean(),
+  is_ldap: z.boolean(),
+  last_login_at: z.string().nullable(),
+  created_at: z.string().nullable(),
+});
+export type AdminUserItem = z.infer<typeof adminUserItemSchema>;
+
+export async function listAdminUsers(): Promise<AdminUserItem[]> {
+  const res = await adminFetch("/admin/users");
+  if (!res.ok) throw new Error("Kullanıcı listesi alınamadı");
+  return adminUserItemSchema.array().parse(await res.json());
+}
+
+export async function patchAdminUser(
+  id: string,
+  body: { is_superuser?: boolean; is_active?: boolean },
+): Promise<AdminUserItem> {
+  const res = await adminFetch(`/admin/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  if (res.status === 404) throw new Error("Kullanıcı bulunamadı");
+  if (res.status === 409) throw new Error("Bu hesap korunuyor (kendin / bootstrap admin)");
+  if (!res.ok) throw new Error("Güncelleme başarısız");
+  return adminUserItemSchema.parse(await res.json());
+}
+
 // ---- LDAP mappings (kılavuz §5) --------------------------------------
 
 export const ldapMappingItemSchema = z.object({

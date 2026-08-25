@@ -140,6 +140,7 @@ class OutboxDispatcher:
                 await session.rollback()
                 log_event(
                     logger, "outbox.claim.empty",
+                    level=logging.DEBUG,
                     worker_id=self._worker_id,
                 )
                 return 0

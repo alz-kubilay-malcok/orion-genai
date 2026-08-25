@@ -73,7 +73,9 @@ async def provision_ldap_user(
         user.email = user.email or email
         user.display_name = identity.display_name or user.display_name
         user.password_hash = None
-        user.is_superuser = _is_ldap_admin(identity)
+        # LDAP_ADMIN_GROUP her login'de superuser yapar. Panelden verilen
+        # yetki (bootstrap/LDAP admin) sonraki login'de silinmez.
+        user.is_superuser = _is_ldap_admin(identity) or user.is_superuser
     user.last_login_at = datetime.now(tz=timezone.utc)
     await session.flush()
     return user
