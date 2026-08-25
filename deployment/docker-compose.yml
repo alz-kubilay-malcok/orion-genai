@@ -9,14 +9,22 @@
 # üzerinden ``env_file`` ile container'a girer. ``environment:`` bloğuna
 # yazılmaz — compose ``$`` interpolasyonu bind parolasını bozar.
 #
-# Port haritası (host ↔ container):
-#   frontend (next start)        8058 ↔ 3000
-#   backend-api (uvicorn)        8056 ↔ 8000
-#   backend-worker (probe)       8057 ↔ 8057
-#   postgres                     internal-only (no host publish);
-#                                ``docker compose exec postgres psql ...``
+# Bu stack mevcut host servislerine DOKUNMAZ: ayrı compose project
+# (genai-orion-panel), ayrı network, ayrı container_name, Postgres host'a
+# publish edilmez. LiteLLM / MCP / Redis / diğer Postgres'ler zaten
+# makinede; onları yeniden ayağa kaldırmayız, URL ile konuşuruz.
 #
-# Host portları: 8056-8058 inventory taramasıyla boştur.
+# Port haritası (host ↔ container) — PANEL_*_HOST_PORT ile override:
+#   frontend (next start)        8058 ↔ 3000
+#   backend-api (uvicorn)        8056 ↔ 8000   (host 8000 = litellm, KULLANMA)
+#   backend-worker (probe)       8057 ↔ 8057
+#   postgres                     publish YOK   (host 5432 = idp_genai_postgres)
+#
+# prdgenai01 (2026-08-25) dolu host portları — bind etme:
+#   5432 idp postgres · 5433 raghub-db · 6379/6380/6381 redis
+#   8000 litellm · 8001-8055 yoğun (midcorp 8049/8050, mcp 8051-8055)
+#   8065 kubeflow · 8067 etl · 8077 masker · 8081 mongo-express · 8090 damage
+# Boş blok: 8056-8064. Biz 8056/8057/8058 aldık.
 # =============================================================================
 
 name: genai-orion-panel
@@ -48,10 +56,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
-    # NOT: Postgres container içinde tamamen internal'dır. Yayın publish
-    # YOK — backend DNS üzerinden ``postgres:5432``'e bağlanır. Operatör
-    # psql erişmek istediğinde ``docker compose exec postgres psql -U
-    # $DB_USERNAME -d $DB_NAME`` ile çalışır.
+    # Host 5432 zaten idp_genai_postgres'te. Publish YOK — backend
+    # compose DNS ``postgres:5432`` kullanır. Operatör:
+    #   docker compose exec postgres psql -U panel -d panel
 
   # -- Backend API -----------------------------------------------------------
   backend-api:
@@ -96,6 +103,9 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@local}
       LDAP_ENABLED: ${LDAP_ENABLED:-false}
       GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE: ${GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE:-hmac}
+    extra_hosts:
+      # Host'taki litellm (:8000), mcp-gateway (:8030) vb. için.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./certs:/etc/ssl/corp:ro
     command: ["sh", "-c", "python main.py migrate && python main.py api"]
@@ -106,9 +116,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    # ---- 8056 host : 8000 container ----
+    # Host 8000 litellm'de; container içi 8000, host'ta PANEL_API_HOST_PORT.
     ports:
-      - "8056:8000"
+      - "${PANEL_API_HOST_PORT:-8056}:8000"
 
   # -- Backend outbox worker -------------------------------------------------
   backend-worker:
@@ -149,32 +159,30 @@ services:
       KEY_ENCRYPTION_KEY_VERSION: ${KEY_ENCRYPTION_KEY_VERSION:-1}
       PUBLIC_ACTION_BASE_URL: ${PUBLIC_ACTION_BASE_URL:-http://localhost:8058/approvals}
       MAIL_SINK_DIR: /app/test_env/mailbox
-      # Probe ayarları — mevcut host portu 8057; birden fazla worker
-      # replica deploy ederseniz her birine farklı host portu override
-      # etmeniz gerekir (--scale çakışma yaratır).
-      WORKER_HEALTH_PORT: "8057"
+      # Probe container içi. Host mapping: PANEL_WORKER_HOST_PORT.
+      # --scale kullanma: aynı host portu çakışır.
+      WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-8057}
       WORKER_HEALTH_HOST: 0.0.0.0
       WORKER_MIN_UPTIME_SECONDS: ${WORKER_MIN_UPTIME_SECONDS:-15}
       WORKER_STALE_AFTER_SECONDS: ${WORKER_STALE_AFTER_SECONDS:-180}
       WORKER_HEARTBEAT_CHECK: ${WORKER_HEARTBEAT_CHECK:-false}
       WORKER_ID: ${WORKER_ID:-panel-worker-1}
       WORKER_CHILD_CMD: "python main.py worker"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["python", "/app/deployment/scripts/worker_wrapper.py"]
     working_dir: /app/backend
     volumes:
       - ../test_env/mailbox:/app/test_env/mailbox
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8057/health/live', timeout=3).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import os,urllib.request,sys; p=os.environ.get('WORKER_HEALTH_PORT','8057'); sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/health/live' % p, timeout=3).status==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
-    # ---- 8057 host : 8057 container ----
-    # NOT: 8057 'yi container içinde de worker_probe kullanıyor; birden
-    # fazla worker deploy edilirse her birinin WORKER_HEALTH_PORT
-    # override edilmelidir.
+    # Host 8057 şu an boş. Container dinleme portu WORKER_HEALTH_PORT.
     ports:
-      - "8057:8057"
+      - "${PANEL_WORKER_HOST_PORT:-8057}:${WORKER_HEALTH_PORT:-8057}"
 
   # -- Frontend (Next.js) ----------------------------------------------------
   frontend:
@@ -191,7 +199,7 @@ services:
       backend-api:
         condition: service_healthy
     ports:
-      - "8058:3000"
+      - "${PANEL_WEB_HOST_PORT:-8058}:3000"
     healthcheck:
       # Alpine-node busybox-wget içerir; next start root/ döner 200 ancak
       # SPA history fallback'leri /about gibi path'lerde 200 döndüğü için
