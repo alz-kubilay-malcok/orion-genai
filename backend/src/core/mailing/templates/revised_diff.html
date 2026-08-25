@@ -1,0 +1,62 @@
+<!--
+  Template: revised_diff.html
+  Alıcı: requester (revize sonrası diff bildirimi).
+  Tetikleyen: outbox SEND_REVISED_MAIL, request_type=LITELLM_KEY,
+  snapshot varsa (operasyonel-only revize'de atlanır).
+  Operasyonel tpm/rpm approve ASLA gösterilmez; sadece client-facing
+  alanlardaki değişiklik (modeller / yanıt süresi / kullanım sıklığı).
+-->
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>GenAi Key Dispatcher — Revize özeti</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#222; margin:0; padding:24px; background:#f5f6f8; }
+    .container { max-width:640px; margin:0 auto; background:#fff; border:1px solid #e3e6ea; border-radius:8px; overflow:hidden; }
+    .header { background:#5a3e9c; color:#fff; padding:18px 24px; font-size:18px; font-weight:600; }
+    .header small { display:block; font-weight:400; font-size:12px; opacity:.85; margin-top:4px; }
+    .body { padding:24px; line-height:1.5; }
+    .body p { margin:0 0 12px 0; }
+    table.diff { border-collapse:collapse; width:100%%; margin:12px 0; }
+    table.diff th, table.diff td { border:1px solid #d8dde3; padding:6px 10px; text-align:left; vertical-align:top; font-size:14px; }
+    table.diff th { background:#eef2f7; width:30%%; }
+    .changed { background:#fff8e1; }
+    .footer { padding:14px 24px; font-size:12px; color:#6c737a; border-top:1px solid #e3e6ea; background:#fafbfc; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      GenAi Key Dispatcher
+      <small>LiteLLM key talebinizde admin düzeltmesi yapıldı</small>
+    </div>
+    <div class="body">
+      <p>Merhaba <strong>$requester_name</strong>,</p>
+      <p>
+        $ticket_id numaralı LiteLLM API anahtarı talebiniz admin
+        tarafından revize edildi. Yapılan değişiklikler aşağıdadır.
+      </p>
+
+      <table class="diff">
+        <thead>
+          <tr><th>Alan</th><th>Önceki</th><th>Yeni</th></tr>
+        </thead>
+        <tbody>
+          $diff_rows
+        </tbody>
+      </table>
+
+      <p>
+        Değişiklikler onaylandı; yeni limitlerle provisioning tamamlandı.
+        Operasyonel tpm/rpm sayıları güvenlik nedeniyle bu mailde
+        paylaşılmaz.
+      </p>
+    </div>
+    <div class="footer">
+      GenAi Key Dispatcher · Agent-assisted self-service portal.<br>
+      Revize tarihi: $completed_at.
+    </div>
+  </div>
+</body>
+</html>

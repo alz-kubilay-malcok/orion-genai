@@ -1,0 +1,81 @@
+<!--
+  Template: mcp_key_approval.html
+  Alıcı: onaylayacak admin(ler).
+  Tetikleyen: outbox SEND_APPROVAL_MAIL, request_type=MCP_KEY.
+  MCP_KEY için Revise yoktur — sadece Approve/Reject (ADR-011).
+-->
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>GenAi Key Dispatcher — Approval required</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#222; margin:0; padding:24px; background:#f5f6f8; }
+    .container { max-width:640px; margin:0 auto; background:#fff; border:1px solid #e3e6ea; border-radius:8px; overflow:hidden; }
+    .header { background:#0a3370; color:#fff; padding:18px 24px; font-size:18px; font-weight:600; }
+    .header small { display:block; font-weight:400; font-size:12px; opacity:.85; margin-top:4px; }
+    .body { padding:24px; line-height:1.5; }
+    .body p { margin:0 0 12px 0; }
+    table.kv { border-collapse:collapse; width:100%%; margin:16px 0; }
+    table.kv th, table.kv td { border:1px solid #d8dde3; padding:6px 10px; text-align:left; vertical-align:top; font-size:14px; }
+    table.kv th { background:#eef2f7; width:36%%; }
+    .pill { display:inline-block; padding:2px 9px; border-radius:11px; font-size:12px; font-weight:600; background:#e3eaf5; color:#0a3370; }
+    table.tools { border-collapse:collapse; width:100%%; margin:12px 0 16px 0; }
+    table.tools th, table.tools td { border:1px solid #d8dde3; padding:4px 8px; text-align:left; font-size:13px; }
+    table.tools th { background:#eef2f7; }
+    .actions { margin-top:24px; }
+    .approve, .reject { display:inline-block; padding:10px 18px; border-radius:6px; font-size:14px; font-weight:600; text-decoration:none; }
+    .approve { background:#1a8754; color:#fff; margin-right:8px; }
+    .reject  { background:#b3261e; color:#fff; }
+    .footer { padding:14px 24px; font-size:12px; color:#6c737a; border-top:1px solid #e3e6ea; background:#fafbfc; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      GenAi Key Dispatcher
+      <small>MCP server key — onayınız bekleniyor</small>
+    </div>
+    <div class="body">
+      <p>Merhaba <strong>$approver_name</strong>,</p>
+      <p>
+        Aşağıdaki MCP server key talebi için admin kararınız bekleniyor.
+        Catalog kaydındaki tool listesi ve <code>all_tools</code> izni
+        aşağıda özetlenmiştir.
+      </p>
+
+      <table class="kv">
+        <tr><th>Ticket</th>       <td>$ticket_id</td></tr>
+        <tr><th>Talep sahibi</th> <td>$requester_name &lt;$requester_email&gt;</td></tr>
+        <tr><th>Departman</th>    <td>$department_name</td></tr>
+        <tr><th>Ortam</th>        <td><span class="pill">$environment</span></td></tr>
+        <tr><th>Server</th>       <td>$server_display_name <small>($server_slug)</small></td></tr>
+        <tr><th>Tüm araçlar</th>  <td>$all_tools_label</td></tr>
+        <tr><th>Oluşturuldu</th>  <td>$created_at</td></tr>
+      </table>
+
+      <p><strong>Talep edilen araçlar</strong></p>
+      <table class="tools">
+        <thead><tr><th>Tool adı</th><th>Açıklama</th></tr></thead>
+        <tbody>
+          $tools_rows
+        </tbody>
+      </table>
+
+      <p>
+        Token'lı bağlantılar tek kullanımlıktır. MCP key talepleri
+        revize edilemez; yalnızca onay veya red verebilirsiniz.
+      </p>
+
+      <div class="actions">
+        <a class="approve" href="$approve_link?request_version=$request_version">Onayla</a>
+        <a class="reject"  href="$reject_link?request_version=$request_version">Reddet</a>
+      </div>
+    </div>
+    <div class="footer">
+      GenAi Key Dispatcher · Agent-assisted self-service portal.<br>
+      Token süresi: $action_token_ttl_hours saat.
+    </div>
+  </div>
+</body>
+</html>

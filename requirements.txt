@@ -1,0 +1,34 @@
+# GenAiOrionPanel — pip-managed runtime requirements.
+# Tek requirements.txt; workspace paketleri (container içindeki
+# ``backend/src/api``, ``backend/src/schema/`` vs.) Dockerfile/backend
+# tarafından ``COPY`` ile getirilip ``PYTHONPATH=/app`` ile çözünür.
+# Editable kurulum (``-e ...`` veya ``setup.py``) artık kullanılmıyor —
+# hedef tek komut: ``pip install -r requirements.txt``.
+#
+# Kurulum (host/venv):
+#   py -3.12 -m venv backend/.venv
+#   backend/.venv/Scripts/activate
+#   pip install -U pip wheel
+#   pip install -r requirements.txt
+#
+# Kurulum (container — Dockerfile.backend zaten bu adımı yapar):
+#   pip install -r requirements.txt
+
+# ---- Run-time (PyPI) — tüm pyproject.toml deps birleşik ----
+alembic>=1.13
+asyncpg>=0.29
+aiosqlite
+cryptography>=43.0
+email-validator>=2.0
+fastapi>=0.115
+httpx>=0.27
+jinja2>=3.1
+pydantic>=2.9
+pydantic-settings>=2.5
+pyjwt>=2.8
+sqlalchemy[asyncio]>=2.0
+uvicorn[standard]>=0.30
+
+# ---- Opsiyonel: yerel .env okuyucu ----
+# Harness zaten minimal kendi parser'ini kullaniyor; istege bagli:
+python-dotenv>=1.0,<2.0

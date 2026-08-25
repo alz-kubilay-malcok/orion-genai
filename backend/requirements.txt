@@ -1,0 +1,4 @@
+ldap3>=2.9,<3
+pyjwt>=2.8
+bcrypt>=4.0
+pydantic-settings>=2.0

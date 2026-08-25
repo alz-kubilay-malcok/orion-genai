@@ -1,0 +1,84 @@
+<!--
+  Template: litellm_key_result.html
+  Alıcı: requester (GenAi biletini açan kullanıcı).
+  Tetikleyen: outbox SEND_RESULT_MAIL veya SEND_REVISED_MAIL, talep
+  tamamlandığında (approved → claim URL ile) veya reddedildiğinde.
+-->
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>GenAi Key Dispatcher — Sonuç</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#222; margin:0; padding:24px; background:#f5f6f8; }
+    .container { max-width:640px; margin:0 auto; background:#fff; border:1px solid #e3e6ea; border-radius:8px; overflow:hidden; }
+    .header { background:#0a3370; color:#fff; padding:18px 24px; font-size:18px; font-weight:600; }
+    .header small { display:block; font-weight:400; font-size:12px; opacity:.85; margin-top:4px; }
+    .header.approved { background:#1a8754; }
+    .header.rejected { background:#b3261e; }
+    .body { padding:24px; line-height:1.5; }
+    .body p { margin:0 0 12px 0; }
+    table.kv { border-collapse:collapse; width:100%%; margin:16px 0; }
+    table.kv th, table.kv td { border:1px solid #d8dde3; padding:6px 10px; text-align:left; vertical-align:top; font-size:14px; }
+    table.kv th { background:#eef2f7; width:36%%; }
+    .claim { display:inline-block; padding:10px 18px; border-radius:6px; font-size:14px; font-weight:600; color:#fff; background:#0a3370; text-decoration:none; }
+    .footer { padding:14px 24px; font-size:12px; color:#6c737a; border-top:1px solid #e3e6ea; background:#fafbfc; }
+    .warn { background:#fff8e1; border:1px solid #f0c24a; padding:10px 12px; border-radius:6px; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header $outcome_class">
+      GenAi Key Dispatcher
+      <small>LiteLLM API key talebinizin sonucu</small>
+    </div>
+    <div class="body">
+      <p>Merhaba <strong>$requester_name</strong>,</p>
+      <p>
+        $ticket_id numaralı LiteLLM API anahtarı talebiniz
+        <strong>$outcome_label</strong>.
+      </p>
+
+      <table class="kv">
+        <tr><th>Ticket</th>      <td>$ticket_id</td></tr>
+        <tr><th>Ortam</th>       <td>$environment</td></tr>
+        <tr><th>Modeller</th>    <td>$models</td></tr>
+        #if approved
+        <tr><th>Key alias</th>   <td>$key_alias</td></tr>
+        <tr><th>TPM / RPM</th>   <td>$tpm_approved / $rpm_approved</td></tr>
+        <tr><th>Geçerlilik</th>  <td>$expires_at</td></tr>
+        #end
+        #if rejected
+        <tr><th>Red sebebi</th>  <td>$reject_reason</td></tr>
+        #end
+      </table>
+
+      #if approved
+      <p>
+        Anahtarınız oluşturuldu ve şifreli olarak saklanıyor.
+        İlk kullanım için anahtarınızı aşağıdaki tek kullanımlık
+        bağlantıdan talep edin; bağlantıyı açtığınızda talep
+        işleminin tamamlandığını onaylıyor olacaksınız.
+      </p>
+      <p><a class="claim" href="$claim_link">Anahtarımı talep et</a></p>
+      <div class="warn">
+        Bu bağlantı tek kullanımlıktır ve SSO oturumunuzla imzalanır.
+        Lütfen anahtarınızı bir secret manager'a (ör. Bitwarden) kaydedin;
+        bu bağlantı tekrar gösterilmez.
+      </div>
+      #end
+
+      #if rejected
+      <p>
+        Talebiniz üzerinde değişiklik yapıp yeniden açabilirsiniz;
+        itiraz varsa talebi açan ticket'a geri dönüş yazabilirsiniz.
+      </p>
+      #end
+    </div>
+    <div class="footer">
+      GenAi Key Dispatcher · Agent-assisted self-service portal.<br>
+      Bu mail $completed_at tarihinde otomatik üretildi.
+    </div>
+  </div>
+</body>
+</html>

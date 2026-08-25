@@ -1,0 +1,64 @@
+# ---- Runtime ----
+.venv/
+venv/
+env/
+
+# ---- Python build / artifacts ----
+build/
+dist/
+*.egg-info/
+*.whl
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---- Test / coverage ----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.cache
+
+# ---- mypy / ruff ----
+.mypy_cache/
+.ruff_cache/
+
+# ---- uv ----
+# uv.lock checked-in olur, fakat local venv ignore edilir.
+!uv.lock
+
+# ---- Node / Next.js (frontend sibling) ----
+node_modules/
+.next/
+out/
+.vite/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- Env / secrets (asla commit edilmemeli) ----
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Misc ----
+.asd_decoded.md

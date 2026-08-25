@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# Backend image — modular monolith, tek image / iki process (api | worker).
+# Varsayılan: ``python main.py`` (migrate + api + worker, ADR-004 ihlali).
+# Compose dosyasında her service için ``command:`` override edilir:
+#   - backend-api:    python main.py migrate && python main.py api
+#   - backend-worker: /app/deployment/scripts/worker_wrapper.py
+# =============================================================================
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+# Sağlık kontrolü ve pg-asyncpg için libpq. ``curl`` compose healthcheck
+# için zorunlu değil ama container içine girenler için işe yarar.
+# ``--no-install-recommends`` ile image şişmesini önlüyoruz.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+        curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---- Requirements: önce sadece requirements'ları kopyalarak dependency
+# cache'in invalidation'ını minimaller. ``backend/requirements.txt`` zaten
+# ``-e backend/src/...`` içeriyor; kaynak aşağıda ayrıca ``COPY`` ile gelir.
+
+COPY requirements.txt /app/requirements.txt
+COPY backend/requirements.txt /app/backend/requirements.txt
+
+# ---- Backend kaynağı. backend/main.py ``os.path.abspath(__file__)`` kullanır;
+# bu yüzden container içinde /app/backend altında olmalı.
+
+COPY backend/     /app/backend/
+COPY deployment/  /app/deployment/
+
+# ---- Pip install: önce backend/requirements.txt, ardından kök requirements.
+# İki aşama layout sayesinde dependency cache invalidation'ı tek dosya
+# değişiminde tetiklenir; ``pip install -r`` değişmezse üst satırlar cache'ten
+# gelir. Runtime paketleri tek başarı yolu olarak kurulur.
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip wheel \
+ && pip install -r /app/backend/requirements.txt \
+ && pip install -r /app/requirements.txt
+
+# ---- Runtime env. ``PROCESS_ROLE`` default api; compose'da override edilir.
+
+ENV PROCESS_ROLE=api \
+    PORT=8000 \
+    API_HOST=0.0.0.0 \
+    API_LOG_LEVEL=info \
+    DB_MODE=pg \
+    APP_ENV=dev
+
+# Portlar: 8000 uvicorn (api), 8057 worker-wrapper stdout probe. Mevcut
+# uygulamanın ulaşmadığı tek port.
+
+EXPOSE 8000 8057
+
+# ---- Sağlık: container ayakta mı? Apiden farklı bir ``HEALTHCHECK``
+# tanımlanırsa compose öncelik alır. Buraya default bırakılmadı çünkü
+# ``command`` geçersiz kılındığında CMD'nin kendisi sağlıklı olur;
+# her service healthcheck'i kendi içinde tanımlar.
+
+# Default process supervisor entry. Compose dosyalarında override gerekir.
+CMD ["python", "backend/main.py", "api"]

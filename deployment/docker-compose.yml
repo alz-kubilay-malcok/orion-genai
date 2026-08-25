@@ -1,0 +1,262 @@
+# =============================================================================
+# GenAiOrionPanel — tek deployment.
+#
+# Profiller (compose v2):
+#   core  (default) → postgres + backend-api + backend-worker + frontend
+#   ldap  (opt-in)  → ek olarak openldap + ldap-ui; LDAP_ENABLED=true ile
+#                     backend LDAP pre-flight aktifleşir.
+#
+# Kullanım:
+#   docker compose up --build                             # core
+#   docker compose --profile ldap up --build              # LDAP dahil core
+#   docker compose --profile ldap logs openldap           # sadece LDAP logları
+#
+# Port haritası (host ↔ container):
+#   frontend (next start)        8058 ↔ 3000
+#   backend-api (uvicorn)        8056 ↔ 8000
+#   backend-worker (probe)       8057 ↔ 8057
+#   postgres                     internal-only (no host publish);
+#                                ``docker compose exec postgres psql ...``
+#   openldap  [profile: ldap]    1389 ↔ 1389   (LDAP)
+#                               1636 ↔ 1636   (LDAPS)
+#   ldap-ui   [profile: ldap]    17170 ↔ 80
+#
+# Host portları seçim sebebi: host'ta 8000-8100 arası çakışmayan 3'lü
+# ardışık port bulunmamakta; 8056-8058 inventory taramasıyla boştur.
+# LDAP / test portları zaten host'ta kullanılmıyor (ss -tuln doğrulandı).
+# =============================================================================
+
+name: genai-orion-panel
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # CORE
+  # ---------------------------------------------------------------------------
+
+  # -- PostgreSQL ------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: genai-orion-panel-postgres
+    restart: unless-stopped
+    profiles: ["core"]
+    environment:
+      POSTGRES_USER: panel
+      # ``.env`` ``DB_PASSWORD`` değişkenini okuyacak; yoksa default
+      # OrionPanel123!. Production'da secret manager'dan besle.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-OrionPanel123!}
+      POSTGRES_DB: ${DB_NAME:-panel}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - panel_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U panel -d panel"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # NOT: Postgres container içinde tamamen internal'dır. Yayın publish
+    # YOK — backend DNS üzerinden ``postgres:5432``'e bağlanır. Operatör
+    # psql erişmek istediğinde ``docker compose exec postgres psql -U
+    # $DB_USERNAME -d $DB_NAME`` ile çalışır.
+
+  # -- Backend API -----------------------------------------------------------
+  backend-api:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+      network: host
+    container_name: genai-orion-panel-api
+    restart: unless-stopped
+    profiles: ["core"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      PROCESS_ROLE: api
+      PORT: "8000"
+      API_HOST: 0.0.0.0
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      DB_MODE: pg
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USERNAME: ${DB_USERNAME:-panel}
+      DB_PASSWORD: ${DB_PASSWORD:-OrionPanel123!}
+      DB_NAME: ${DB_NAME:-panel}
+      CONN_POOL_SIZE: ${CONN_POOL_SIZE:-5}
+      GENAI_ORION_PANEL_WEBHOOK_SECRET: ${GENAI_ORION_PANEL_WEBHOOK_SECRET:-change-me}
+      GENAI_ORION_PANEL_CORS_ORIGINS: ${GENAI_ORION_PANEL_CORS_ORIGINS:-http://localhost:8058,http://localhost:3000}
+      # LDAP pre-flight backend tarafı; ``ldap`` profilini açıp
+      # LDAP_ENABLED=true set etmeden devre dışıdır.
+      LDAP_ENABLED: ${LDAP_ENABLED:-false}
+      LDAP_HOST: ${LDAP_OPENLDAP_HOST:-openldap}
+      LDAP_PORT: ${LDAP_OPENLDAP_PORT:-1389}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-cn=admin,dc=example,dc=org}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-adminpassword}
+      LDAP_SEARCH_BASE: ${LDAP_SEARCH_BASE:-ou=users,dc=example,dc=org}
+      LDAP_USER_FILTER: ${LDAP_USER_FILTER:-(uid={username})}
+      LDAP_USE_SSL: ${LDAP_USE_SSL:-false}
+      LDAP_CONNECT_TIMEOUT: ${LDAP_CONNECT_TIMEOUT:-5}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-placeholder}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-change-me-32-bytes-of-base64-or-hex}
+      MAIL_JWT_SECRET: ${MAIL_JWT_SECRET:-change-me-also-32-bytes}
+      ACTION_SIGNING_SECRET: ${ACTION_SIGNING_SECRET:-change-me-please-32-bytes-or-more0123456789}
+    command: ["sh", "-c", "python main.py migrate && python main.py api"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # ---- 8056 host : 8000 container ----
+    ports:
+      - "8056:8000"
+
+  # -- Backend outbox worker -------------------------------------------------
+  backend-worker:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+      network: host
+    container_name: genai-orion-panel-worker
+    restart: unless-stopped
+    profiles: ["core"]
+    # NOT: backend-api'ye değil postgres'e bağımlı — worker outbox DB'si
+    # paylaşımlı; API ayakta olmasa da fetch yapar. API-only deploy
+    # senaryosunda worker'ı `--scale=0` ile durdurabilirsiniz.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      PROCESS_ROLE: worker
+      DB_MODE: pg
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USERNAME: ${DB_USERNAME:-panel}
+      DB_PASSWORD: ${DB_PASSWORD:-OrionPanel123!}
+      DB_NAME: ${DB_NAME:-panel}
+      WORKER_INTERNAL_SECONDS: ${WORKER_INTERNAL_SECONDS:-10}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-120}
+      WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-8}
+      LITELLM_RETRY: ${LITELLM_RETRY:-10}
+      LITELLM_HOLD_MINUTES: ${LITELLM_HOLD_MINUTES:-5}
+      MAIL_RETRY_MAX: ${MAIL_RETRY_MAX:-5}
+      MAIL_RETRY_BACKOFF_SECONDS: ${MAIL_RETRY_BACKOFF_SECONDS:-60}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-placeholder}
+      MAIL_JWT_SECRET: ${MAIL_JWT_SECRET:-change-me-also-32-bytes}
+      ACTION_SIGNING_SECRET: ${ACTION_SIGNING_SECRET:-change-me-please-32-bytes-or-more0123456789}
+      # Probe ayarları — mevcut host portu 8057; birden fazla worker
+      # replica deploy ederseniz her birine farklı host portu override
+      # etmeniz gerekir (--scale çakışma yaratır).
+      WORKER_HEALTH_PORT: "8057"
+      WORKER_HEALTH_HOST: 0.0.0.0
+      WORKER_MIN_UPTIME_SECONDS: ${WORKER_MIN_UPTIME_SECONDS:-15}
+      WORKER_STALE_AFTER_SECONDS: ${WORKER_STALE_AFTER_SECONDS:-180}
+      WORKER_HEARTBEAT_CHECK: ${WORKER_HEARTBEAT_CHECK:-false}
+      WORKER_ID: ${WORKER_ID:-panel-worker-1}
+      WORKER_CHILD_CMD: "python main.py worker"
+    command: ["python", "deployment/scripts/worker_wrapper.py"]
+    working_dir: /app/backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8057/health/live', timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # ---- 8057 host : 8057 container ----
+    # NOT: 8057 'yi container içinde de worker_probe kullanıyor; birden
+    # fazla worker deploy edilirse her birinin WORKER_HEALTH_PORT
+    # override edilmelidir.
+    ports:
+      - "8057:8057"
+
+  # -- Frontend (Next.js) ----------------------------------------------------
+  frontend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+      network: host
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8056}
+        NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-http://localhost:8058}
+    container_name: genai-orion-panel-frontend
+    restart: unless-stopped
+    profiles: ["core"]
+    depends_on:
+      backend-api:
+        condition: service_healthy
+    ports:
+      - "8058:3000"
+    healthcheck:
+      # Alpine-node busybox-wget içerir; next start root/ döner 200 ancak
+      # SPA history fallback'leri /about gibi path'lerde 200 döndüğü için
+      # kök path yeterli test.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # LDAP profile (opt-in)
+  # ---------------------------------------------------------------------------
+
+  # -- Bitnami OpenLDAP (development) ----------------------------------------
+  openldap:
+    image: bitnami/openldap:2.6
+    container_name: genai-orion-panel-ldap-dev
+    restart: unless-stopped
+    profiles: ["ldap"]
+    # NOT: production'a ait değildir (TLS kapalı, anonymous bind açık).
+    # Prod AD bağlantı ayarları docs/ldap_active_directory_setup.md.
+    ports:
+      - "1389:1389"     # ldap:// plaintext
+      - "1636:1636"     # ldaps:// (self-signed)
+    environment:
+      LDAP_ADMIN_USERNAME: admin
+      LDAP_ADMIN_PASSWORD: adminpassword
+      LDAP_USERS: "kubilay,jane"
+      LDAP_PASSWORDS: "kubilaypassword,janepassword"
+      LDAP_USER_UID: "1000,1001"
+      LDAP_USER_GID: "1000,1001"
+      LDAP_USER_HOME: "/home/{username}"
+      LDAP_GROUPNAME: "developers"
+      LDAP_EXTRA_SCHEMAS: "cosine,inetorgperson,nis"
+      # Kök DN'i core ile hizalanır; backend LDAP pre-flight etiketleri
+      # LDAP_SEARCH_BASE / LDAP_BIND_DN bu değerlere bağlı.
+      LDAP_ROOT: dc=example,dc=org
+    volumes:
+      - panel_openldap_data:/bitnami/openldap
+
+  # -- phpLDAPadmin (read-only admin UI) ------------------------------------
+  ldap-ui:
+    image: osixia/phpldapadmin:0.9.0.3
+    container_name: genai-orion-panel-ldapadmin
+    restart: unless-stopped
+    profiles: ["ldap"]
+    ports:
+      - "17170:80"
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+      PHPLDAPADMIN_AUTO_REMOVE: "no"
+      # Varsayılan oturum açma formu yerine, container DNS adını yaz.
+      PHPLDAPADMIN_LDAP_HOST_DNS: openldap
+    depends_on:
+      - openldap
+
+volumes:
+  panel_pg_data:
+  panel_openldap_data:
+
+networks:
+  default:
+    name: genai-orion-panel-net
