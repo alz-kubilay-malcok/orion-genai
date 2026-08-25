@@ -66,7 +66,7 @@ async def ensure_bootstrap_admin(state: AppState) -> None:
 
 
 async def ensure_approvers(state: AppState) -> None:
-    """Seed ``config_approvers`` from ``APPROVER_EMAILS`` (comma-separated)."""
+    """``APPROVER_EMAILS`` yalnızca eksik satır ekler; panelde kapatılanı açmaz."""
     from backend.src.data.db.models.config_approvers import ConfigApprover
 
     emails = [
@@ -78,23 +78,21 @@ async def ensure_approvers(state: AppState) -> None:
         return
     async with state.session_factory() as session:
         for index, email in enumerate(emails):
+            normalized = email.lower()
             existing = (await session.execute(
                 select(ConfigApprover).where(
-                    ConfigApprover.email == email,
+                    ConfigApprover.email == normalized,
                     ConfigApprover.scope == "GENAI_APPROVAL",
                 )
             )).scalar_one_or_none()
             if existing is None:
                 session.add(ConfigApprover(
                     id=uuid4(),
-                    email=email,
+                    email=normalized,
                     scope="GENAI_APPROVAL",
                     sort_order=index,
                     is_active=True,
                 ))
-            else:
-                existing.is_active = True
-                existing.sort_order = index
         await session.commit()
 
 

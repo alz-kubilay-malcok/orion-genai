@@ -5,9 +5,10 @@
 #     → postgres + backend-api + backend-worker + frontend
 #
 # LDAP: Allianz Active Directory. Compose içinde OpenLDAP / ldap-ui yok.
-# LDAP_* (host, bind DN, parola, CA path) yalnız ``deployment/.env``
-# üzerinden ``env_file`` ile container'a girer. ``environment:`` bloğuna
-# yazılmaz — compose ``$`` interpolasyonu bind parolasını bozar.
+# Sırlar yalnız ``deployment/.env`` → ``env_file``. Compose ``environment:``
+# bloğuna JWT/DB/LDAP parolası yazılmaz — ``$`` interpolasyonu değeri bozar
+# ve env_file'ı ezer. Postgres POSTGRES_* değerleri entrypoint'te DB_* 'dan
+# kopyalanır; sen yalnız DB_USERNAME / DB_PASSWORD / DB_NAME doldur.
 #
 # Bu stack mevcut host servislerine DOKUNMAZ: ayrı compose project
 # (genai-orion-panel), ayrı network, ayrı container_name, Postgres host'a
@@ -40,25 +41,36 @@ services:
     image: postgres:16-alpine
     container_name: genai-orion-panel-postgres
     restart: unless-stopped
+    env_file:
+      - path: ./.env
+        required: true
     environment:
-      POSTGRES_USER: panel
-      # Password: PANEL_DB_PASSWORD (deployment/.env). Do not interpolate
-      # DB_USERNAME/DB_NAME — host ``backend/.env`` (admin/genai_orion) leaks
-      # into compose and recreates Postgres as the local-smoke role.
-      POSTGRES_PASSWORD: ${PANEL_DB_PASSWORD:-OrionPanel123!}
-      POSTGRES_DB: panel
       PGDATA: /var/lib/postgresql/data/pgdata
+    # Resmi image POSTGRES_* bekler. Compose ${DB_PASSWORD} interpolasyonu
+    # paroladaki ``$`` karakterini yer. env_file literali kopyala.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$DB_USERNAME" ] || [ -z "$$DB_PASSWORD" ] || [ -z "$$DB_NAME" ]; then
+          echo "deployment/.env icinde DB_USERNAME, DB_PASSWORD, DB_NAME zorunlu" >&2
+          exit 1
+        fi
+        export POSTGRES_USER="$$DB_USERNAME"
+        export POSTGRES_PASSWORD="$$DB_PASSWORD"
+        export POSTGRES_DB="$$DB_NAME"
+        exec docker-entrypoint.sh postgres
     volumes:
       - panel_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test: ["CMD-SHELL", "pg_isready -U \"$$DB_USERNAME\" -d \"$$DB_NAME\""]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
     # Host 5432 zaten idp_genai_postgres'te. Publish YOK — backend
     # compose DNS ``postgres:5432`` kullanır. Operatör:
-    #   docker compose exec postgres psql -U panel -d panel
+    #   docker compose exec postgres psql -U "$DB_USERNAME" -d "$DB_NAME"
 
   # -- Backend API -----------------------------------------------------------
   backend-api:
@@ -72,37 +84,16 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      # LDAP_* yalnız buradan (deployment/.env). environment: bloğuna basma.
       - path: ./.env
-        required: false
+        required: true
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-dev}
+      # Yalnız compose topolojisi. Sırlar env_file'dan gelir; buraya basma.
       PROCESS_ROLE: api
-      PORT: "8000"
-      API_HOST: 0.0.0.0
-      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
       DB_MODE: pg
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_USERNAME: panel
-      DB_PASSWORD: ${PANEL_DB_PASSWORD:-OrionPanel123!}
-      DB_NAME: panel
-      CONN_POOL_SIZE: ${CONN_POOL_SIZE:-5}
-      GENAI_ORION_PANEL_WEBHOOK_SECRET: ${GENAI_ORION_PANEL_WEBHOOK_SECRET:-change-me}
-      GENAI_ORION_PANEL_CORS_ORIGINS: ${GENAI_ORION_PANEL_CORS_ORIGINS:-http://localhost:8058,http://localhost:3000}
-      MAIL_PROVIDER: ${MAIL_PROVIDER:-placeholder}
-      JWT_SECRET: ${JWT_SECRET:-change-me-32-bytes-of-base64-or-hex}
-      ACTION_SIGNING_SECRET: ${ACTION_SIGNING_SECRET:-change-me-please-32-bytes-or-more0123456789}
-      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:-b3Jpb24tbG9jYWwtZGV2LWFlcy0zMmJ5dGUta2V5ISE=}
-      KEY_ENCRYPTION_KEY_VERSION: ${KEY_ENCRYPTION_KEY_VERSION:-1}
-      PUBLIC_ACTION_BASE_URL: ${PUBLIC_ACTION_BASE_URL:-http://localhost:8058/approvals}
-      APPROVER_EMAILS: ${APPROVER_EMAILS:-approver@example.com}
-      BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-true}
-      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin@local}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin}
-      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@local}
-      LDAP_ENABLED: ${LDAP_ENABLED:-false}
-      GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE: ${GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE:-hmac}
+      PORT: "8000"
+      API_HOST: 0.0.0.0
     extra_hosts:
       # Host'taki litellm (:8000), mcp-gateway (:8030) vb. için.
       - "host.docker.internal:host-gateway"
@@ -136,38 +127,14 @@ services:
         condition: service_healthy
     env_file:
       - path: ./.env
-        required: false
+        required: true
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-dev}
       PROCESS_ROLE: worker
       DB_MODE: pg
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_USERNAME: panel
-      DB_PASSWORD: ${PANEL_DB_PASSWORD:-OrionPanel123!}
-      DB_NAME: panel
-      WORKER_INTERNAL_SECONDS: ${PANEL_WORKER_INTERNAL_SECONDS:-10}
-      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-120}
-      WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-8}
-      LITELLM_RETRY: ${LITELLM_RETRY:-10}
-      LITELLM_HOLD_MINUTES: ${LITELLM_HOLD_MINUTES:-5}
-      MAIL_RETRY_MAX: ${MAIL_RETRY_MAX:-5}
-      MAIL_RETRY_BACKOFF_SECONDS: ${MAIL_RETRY_BACKOFF_SECONDS:-60}
-      MAIL_PROVIDER: ${MAIL_PROVIDER:-placeholder}
-      ACTION_SIGNING_SECRET: ${ACTION_SIGNING_SECRET:-change-me-please-32-bytes-or-more0123456789}
-      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:-b3Jpb24tbG9jYWwtZGV2LWFlcy0zMmJ5dGUta2V5ISE=}
-      KEY_ENCRYPTION_KEY_VERSION: ${KEY_ENCRYPTION_KEY_VERSION:-1}
-      PUBLIC_ACTION_BASE_URL: ${PUBLIC_ACTION_BASE_URL:-http://localhost:8058/approvals}
       MAIL_SINK_DIR: /app/test_env/mailbox
-      # Probe container içi. Host mapping: PANEL_WORKER_HOST_PORT.
-      # --scale kullanma: aynı host portu çakışır.
-      WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-8057}
       WORKER_HEALTH_HOST: 0.0.0.0
-      WORKER_MIN_UPTIME_SECONDS: ${WORKER_MIN_UPTIME_SECONDS:-15}
-      WORKER_STALE_AFTER_SECONDS: ${WORKER_STALE_AFTER_SECONDS:-180}
-      WORKER_HEARTBEAT_CHECK: ${WORKER_HEARTBEAT_CHECK:-false}
-      WORKER_ID: ${WORKER_ID:-panel-worker-1}
-      WORKER_CHILD_CMD: "python main.py worker"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "/app/deployment/scripts/worker_wrapper.py"]

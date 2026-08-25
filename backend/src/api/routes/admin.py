@@ -9,17 +9,19 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from backend.src.adapters.postgres.models import RequestRow
 from backend.src.api.auth.dependencies import get_current_superuser
 from backend.src.api.utils import admin_service
 from backend.src.data.db.models import User
+from backend.src.data.db.models.config_approvers import ConfigApprover
 from backend.src.domain.enums import VALID_ACTIONS_BY_TYPE, RequestType
 from backend.src.domain.errors import DomainError
 
@@ -250,3 +252,140 @@ async def reject(
             content={"error_code": exc.error_code},
         )
     return JSONResponse(content={"request_id": str(request_id), "status": result.new_status})
+
+
+# ---- Approver list (onay maili alıcıları) --------------------------------
+
+_APPROVER_SCOPE = "GENAI_APPROVAL"
+
+
+def _approver_json(row: ConfigApprover) -> dict[str, Any]:
+    created = row.created_at
+    return {
+        "id": str(row.id),
+        "email": row.email,
+        "scope": row.scope,
+        "sort_order": row.sort_order,
+        "is_active": row.is_active,
+        "created_at": created.isoformat() if created is not None else None,
+    }
+
+
+class ApproverCreateBody(BaseModel):
+    email: EmailStr
+
+
+class ApproverPatchBody(BaseModel):
+    is_active: bool | None = None
+    sort_order: Annotated[int | None, Field(default=None, ge=0)] = None
+
+
+@router.get("/approvers")
+async def list_approvers(
+    request: Request,
+    _user: Annotated[User, Depends(get_current_superuser)],
+) -> JSONResponse:
+    state: AppState = request.app.state.container
+    async with state.session_factory() as session:
+        rows = (
+            await session.execute(
+                select(ConfigApprover)
+                .where(ConfigApprover.scope == _APPROVER_SCOPE)
+                .order_by(ConfigApprover.sort_order.asc(), ConfigApprover.email.asc())
+            )
+        ).scalars().all()
+    return JSONResponse(content=[_approver_json(row) for row in rows])
+
+
+@router.post("/approvers")
+async def create_approver(
+    request: Request,
+    body: ApproverCreateBody,
+    _user: Annotated[User, Depends(get_current_superuser)],
+) -> JSONResponse:
+    state: AppState = request.app.state.container
+    email = str(body.email).strip().lower()
+    async with state.session_factory() as session:
+        existing = (
+            await session.execute(
+                select(ConfigApprover).where(
+                    ConfigApprover.email == email,
+                    ConfigApprover.scope == _APPROVER_SCOPE,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.is_active:
+                return JSONResponse(
+                    status_code=409,
+                    content={"error_code": "ALREADY_EXISTS", "id": str(existing.id)},
+                )
+            existing.is_active = True
+            await session.commit()
+            await session.refresh(existing)
+            return JSONResponse(status_code=200, content=_approver_json(existing))
+        max_order = (
+            await session.execute(
+                select(ConfigApprover.sort_order)
+                .where(ConfigApprover.scope == _APPROVER_SCOPE)
+                .order_by(ConfigApprover.sort_order.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        row = ConfigApprover(
+            id=uuid4(),
+            email=email,
+            scope=_APPROVER_SCOPE,
+            sort_order=(max_order or 0) + 1,
+            is_active=True,
+        )
+        session.add(row)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            return JSONResponse(
+                status_code=409,
+                content={"error_code": "ALREADY_EXISTS"},
+            )
+        await session.refresh(row)
+        return JSONResponse(status_code=201, content=_approver_json(row))
+
+
+@router.patch("/approvers/{approver_id}")
+async def patch_approver(
+    request: Request,
+    approver_id: UUID,
+    body: ApproverPatchBody,
+    _user: Annotated[User, Depends(get_current_superuser)],
+) -> JSONResponse:
+    if body.is_active is None and body.sort_order is None:
+        return JSONResponse(status_code=422, content={"error_code": "EMPTY_PATCH"})
+    state: AppState = request.app.state.container
+    async with state.session_factory() as session:
+        row = await session.get(ConfigApprover, approver_id)
+        if row is None or row.scope != _APPROVER_SCOPE:
+            return JSONResponse(status_code=404, content={"error_code": "NOT_FOUND"})
+        if body.is_active is not None:
+            row.is_active = body.is_active
+        if body.sort_order is not None:
+            row.sort_order = body.sort_order
+        await session.commit()
+        await session.refresh(row)
+        return JSONResponse(content=_approver_json(row))
+
+
+@router.delete("/approvers/{approver_id}")
+async def delete_approver(
+    request: Request,
+    approver_id: UUID,
+    _user: Annotated[User, Depends(get_current_superuser)],
+) -> JSONResponse:
+    state: AppState = request.app.state.container
+    async with state.session_factory() as session:
+        row = await session.get(ConfigApprover, approver_id)
+        if row is None or row.scope != _APPROVER_SCOPE:
+            return JSONResponse(status_code=404, content={"error_code": "NOT_FOUND"})
+        await session.delete(row)
+        await session.commit()
+    return Response(status_code=204)
