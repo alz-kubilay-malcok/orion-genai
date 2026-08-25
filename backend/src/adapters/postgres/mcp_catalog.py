@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from backend.src.data.db.models.config_mcp_servers import ConfigMCPServer
 from backend.src.data.db.models.config_mcp_tools import ConfigMCPTool
@@ -57,9 +56,10 @@ class SqlAlchemyMCPCatalogPort:
                 ConfigMCPServer.environment == ortam,
                 ConfigMCPServer.is_active.is_(True),
             )
-            .options(selectinload(ConfigMCPServer.id))    # placeholder, gerçek
-            .order_by(ConfigMCPServer.display_name.asc(),
-                      ConfigMCPServer.slug.asc())
+            .order_by(
+                ConfigMCPServer.display_name.asc(),
+                ConfigMCPServer.slug.asc(),
+            )
         )
         result = await self._session.execute(stmt)
         servers = result.scalars().all()
