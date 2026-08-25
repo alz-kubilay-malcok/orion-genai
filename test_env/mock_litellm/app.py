@@ -6,6 +6,8 @@ Worker'ın çağırdığı yüzey:
 * ``GET  /team/list``
 * ``POST /mcp/keys/create``
 * ``PUT  /mcp/servers/upsert``
+* ``GET  /v1/mcp/server``
+* ``GET  /mcp-rest/tools/list``
 
 Auth: ``Authorization: Bearer $LITELLM_ACCESS_KEY``.
 ``MOCK_LITELLM_AUTH_OFF=1`` ile kapatılır.
@@ -297,6 +299,48 @@ def create_app() -> FastAPI:
     async def list_mcp_servers() -> list[dict[str, Any]]:
         with _STATE_RLOCK:
             return list(_load_state()["mcp_servers"].values())
+
+    @application.get("/v1/mcp/server", dependencies=[Depends(_enforce_auth)])
+    async def list_mcp_servers_v1() -> list[dict[str, Any]]:
+        """Gerçek LiteLLM `GET /v1/mcp/server` şekli."""
+        with _STATE_RLOCK:
+            stored = list(_load_state()["mcp_servers"].values())
+        return [
+            {
+                "server_id": row.get("server_id") or row.get("slug"),
+                "server_name": row.get("slug") or row.get("server_name"),
+                "alias": row.get("slug") or row.get("alias"),
+                "display_name": row.get("display_name"),
+                "url": row.get("endpoint_url"),
+                "allowed_tools": list(row.get("tools") or []),
+            }
+            for row in stored
+        ]
+
+    @application.get("/mcp-rest/tools/list", dependencies=[Depends(_enforce_auth)])
+    async def list_mcp_tools(server_id: str | None = None) -> dict[str, Any]:
+        """Gerçek LiteLLM `GET /mcp-rest/tools/list` şekli."""
+        with _STATE_RLOCK:
+            stored = list(_load_state()["mcp_servers"].values())
+        tools: list[dict[str, Any]] = []
+        needle = (server_id or "").strip().casefold()
+        for row in stored:
+            slug = str(row.get("slug") or "")
+            sid = str(row.get("server_id") or slug)
+            if needle and needle not in {sid.casefold(), slug.casefold()}:
+                continue
+            for name in row.get("tools") or []:
+                tools.append(
+                    {
+                        "name": name,
+                        "mcp_info": {
+                            "server_id": sid,
+                            "server_name": slug,
+                            "alias": slug,
+                        },
+                    }
+                )
+        return {"tools": tools, "error": None, "message": "Successfully retrieved tools"}
 
     @application.get("/__mock/log", dependencies=[Depends(_enforce_auth)])
     async def dump_log(limit: int = 50) -> list[dict[str, Any]]:
