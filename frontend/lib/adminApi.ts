@@ -301,6 +301,7 @@ export const adminUserItemSchema = z.object({
   display_name: z.string().nullable(),
   is_superuser: z.boolean(),
   is_active: z.boolean(),
+  is_approver: z.boolean(),
   is_ldap: z.boolean(),
   last_login_at: z.string().nullable(),
   created_at: z.string().nullable(),
@@ -315,7 +316,7 @@ export async function listAdminUsers(): Promise<AdminUserItem[]> {
 
 export async function patchAdminUser(
   id: string,
-  body: { is_superuser?: boolean; is_active?: boolean },
+  body: { is_superuser?: boolean; is_active?: boolean; is_approver?: boolean },
 ): Promise<AdminUserItem> {
   const res = await adminFetch(`/admin/users/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -323,6 +324,7 @@ export async function patchAdminUser(
   });
   if (res.status === 404) throw new Error("Kullanıcı bulunamadı");
   if (res.status === 409) throw new Error("Bu hesap korunuyor (kendin / bootstrap admin)");
+  if (res.status === 422) throw new Error("Onaylayan için geçerli e-posta yok");
   if (!res.ok) throw new Error("Güncelleme başarısız");
   return adminUserItemSchema.parse(await res.json());
 }

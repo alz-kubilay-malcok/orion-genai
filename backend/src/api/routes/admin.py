@@ -393,7 +393,7 @@ async def delete_approver(
 
 # ---- Users (LDAP admin group + bootstrap admin = is_superuser) -----------
 
-def _user_json(row: User) -> dict[str, Any]:
+def _user_json(row: User, *, is_approver: bool = False) -> dict[str, Any]:
     last = row.last_login_at
     created = row.created_at
     return {
@@ -403,10 +403,51 @@ def _user_json(row: User) -> dict[str, Any]:
         "display_name": row.display_name,
         "is_superuser": row.is_superuser,
         "is_active": row.is_active,
+        "is_approver": is_approver,
         "is_ldap": bool(row.ldap_dn),
         "last_login_at": last.isoformat() if last is not None else None,
         "created_at": created.isoformat() if created is not None else None,
     }
+
+
+async def _approver_email_set(session: object) -> set[str]:
+    rows = (
+        await session.execute(  # type: ignore[union-attr]
+            select(ConfigApprover.email).where(
+                ConfigApprover.scope == _APPROVER_SCOPE,
+                ConfigApprover.is_active.is_(True),
+            )
+        )
+    ).scalars().all()
+    return {str(email).strip().lower() for email in rows}
+
+
+async def _set_user_approver(session: object, email: str, *, enabled: bool) -> None:
+    normalized = email.strip().lower()
+    if "@" not in normalized:
+        raise ValueError("NO_EMAIL")
+    existing = (
+        await session.execute(  # type: ignore[union-attr]
+            select(ConfigApprover).where(
+                ConfigApprover.email == normalized,
+                ConfigApprover.scope == _APPROVER_SCOPE,
+            )
+        )
+    ).scalar_one_or_none()
+    if enabled:
+        if existing is None:
+            session.add(ConfigApprover(  # type: ignore[union-attr]
+                id=uuid4(),
+                email=normalized,
+                scope=_APPROVER_SCOPE,
+                sort_order=0,
+                is_active=True,
+            ))
+        else:
+            existing.is_active = True
+        return
+    if existing is not None:
+        existing.is_active = False
 
 
 def _bootstrap_username(request: Request) -> str:
@@ -417,6 +458,7 @@ def _bootstrap_username(request: Request) -> str:
 class UserPatchBody(BaseModel):
     is_superuser: bool | None = None
     is_active: bool | None = None
+    is_approver: bool | None = None
 
 
 @router.get("/users")
@@ -431,7 +473,13 @@ async def list_users(
                 select(User).order_by(User.is_superuser.desc(), User.username.asc())
             )
         ).scalars().all()
-    return JSONResponse(content=[_user_json(row) for row in rows])
+        approvers = await _approver_email_set(session)
+    return JSONResponse(
+        content=[
+            _user_json(row, is_approver=(row.email or "").strip().lower() in approvers)
+            for row in rows
+        ]
+    )
 
 
 @router.patch("/users/{user_id}")
@@ -441,7 +489,7 @@ async def patch_user(
     body: UserPatchBody,
     actor: Annotated[User, Depends(get_current_superuser)],
 ) -> JSONResponse:
-    if body.is_superuser is None and body.is_active is None:
+    if body.is_superuser is None and body.is_active is None and body.is_approver is None:
         return JSONResponse(status_code=422, content={"error_code": "EMPTY_PATCH"})
     bootstrap = _bootstrap_username(request)
     state: AppState = request.app.state.container
@@ -460,7 +508,21 @@ async def patch_user(
             row.is_superuser = body.is_superuser
         if body.is_active is not None:
             row.is_active = body.is_active
+        if body.is_approver is not None:
+            try:
+                await _set_user_approver(session, row.email or "", enabled=body.is_approver)
+            except ValueError:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error_code": "NO_EMAIL"},
+                )
         await session.commit()
         await session.refresh(row)
-        return JSONResponse(content=_user_json(row))
+        approvers = await _approver_email_set(session)
+        return JSONResponse(
+            content=_user_json(
+                row,
+                is_approver=(row.email or "").strip().lower() in approvers,
+            )
+        )
 

@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Users } from "lucide-react";
+import { Loader2, Plus, Users } from "lucide-react";
 
 import {
+  createApprover,
   listAdminUsers,
   patchAdminUser,
   type AdminUserItem,
@@ -19,6 +20,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Feedback =
   | { kind: "info"; message: string }
@@ -29,6 +32,8 @@ function UsersContent() {
   const [items, setItems] = useState<AdminUserItem[] | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [approverEmail, setApproverEmail] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const refresh = useCallback(async () => {
     const rows = await listAdminUsers();
@@ -57,7 +62,7 @@ function UsersContent() {
 
   async function handlePatch(
     row: AdminUserItem,
-    body: { is_superuser?: boolean; is_active?: boolean },
+    body: { is_superuser?: boolean; is_active?: boolean; is_approver?: boolean },
   ) {
     setBusyId(row.id);
     setFeedback(null);
@@ -74,6 +79,27 @@ function UsersContent() {
     }
   }
 
+  async function handleAddApprover(e: React.FormEvent) {
+    e.preventDefault();
+    const value = approverEmail.trim();
+    if (!value.includes("@") || adding) return;
+    setAdding(true);
+    setFeedback(null);
+    try {
+      await createApprover(value);
+      setApproverEmail("");
+      await refresh();
+      setFeedback({ kind: "info", message: `${value} onaylayan listesine eklendi` });
+    } catch (err) {
+      setFeedback({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Onaylayan eklenemedi",
+      });
+    } finally {
+      setAdding(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
@@ -81,10 +107,48 @@ function UsersContent() {
           <Users className="size-5" /> Kullanıcı Yönetimi
         </h1>
         <p className="text-sm text-muted-foreground">
-          LDAP_ADMIN_GROUP üyeleri ve bootstrap admin aynı yetkiye sahip.
-          Panelden verilen superuser, sonraki LDAP login’de silinmez.
+          Superuser yetkisi ve onay maili alıcıları buradan yönetilir.
+          Henüz giriş yapmamış birini onaylayan yapmak için e-posta eklemen yeterli.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Plus className="size-4" /> Onaylayan ekle
+          </CardTitle>
+          <CardDescription>
+            Onay maili bu adrese gider. Kişinin panele giriş yapmış olması gerekmez.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="flex flex-col gap-3 sm:flex-row sm:items-end"
+            onSubmit={(e) => void handleAddApprover(e)}
+          >
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <Label htmlFor="approver-email">E-posta</Label>
+              <Input
+                id="approver-email"
+                type="email"
+                value={approverEmail}
+                onChange={(e) => setApproverEmail(e.target.value)}
+                placeholder="onaylayan@allianz.com.tr"
+                autoComplete="off"
+                required
+                disabled={adding}
+              />
+            </div>
+            <Button
+              type="submit"
+              disabled={adding || !approverEmail.trim().includes("@")}
+            >
+              {adding && <Loader2 className="size-4 animate-spin" />}
+              Ekle
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       {feedback && (
         <p
@@ -133,6 +197,9 @@ function UsersContent() {
                         <Badge variant="outline">
                           {row.is_ldap ? "LDAP" : "Yerel"}
                         </Badge>
+                        <Badge variant={row.is_approver ? "success" : "outline"}>
+                          {row.is_approver ? "Onaylayan" : "Onaylayan değil"}
+                        </Badge>
                       </div>
                     </div>
                     <CardDescription>
@@ -165,6 +232,17 @@ function UsersContent() {
                       }
                     >
                       {row.is_active ? "Pasifleştir" : "Aktifleştir"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        void handlePatch(row, { is_approver: !row.is_approver })
+                      }
+                    >
+                      {row.is_approver ? "Onaylayanlıktan çıkar" : "Onaylayan yap"}
                     </Button>
                   </CardContent>
                 </Card>
