@@ -87,11 +87,58 @@ def build_key_generate_body(
     return body
 
 
+# MCP key LLM modellerine düşmesin.
+MCP_NO_LLM_MODELS = ["no-default-models"]
+_LEGACY_MCP_KEY_PATHS = {"/mcp/keys/create", "/mcp/keys"}
+
+
+def mcp_key_generate_path(raw: str | None) -> str:
+    """Eski mock path `/mcp/keys/create` gerçek LiteLLM'de yok → `/key/generate`."""
+    path = (raw or "").strip() or "/key/generate"
+    if not path.startswith("/"):
+        path = "/" + path
+    if path.rstrip("/") in _LEGACY_MCP_KEY_PATHS:
+        return "/key/generate"
+    return path
+
+
+def build_mcp_key_generate_body(
+    *,
+    key_alias: str,
+    server_slug: str,
+    tool_names: list[str] | None,
+    all_tools: bool,
+    metadata: Mapping[str, object] | None = None,
+    team_id: str | None = None,
+) -> dict[str, object]:
+    """LiteLLM MCP scoped virtual key — `POST /key/generate`.
+
+    https://docs.litellm.ai/docs/mcp_control
+    """
+    server = server_slug.strip()
+    permission: dict[str, object] = {"mcp_servers": [server]}
+    tools = [str(name).strip() for name in (tool_names or []) if str(name).strip()]
+    if not all_tools and tools:
+        permission["mcp_tool_permissions"] = {server: tools}
+    body: dict[str, object] = {
+        "key_alias": key_alias,
+        "models": list(MCP_NO_LLM_MODELS),
+        "object_permission": permission,
+        "metadata": dict(metadata or {}),
+    }
+    if team_id and team_id.strip():
+        body["team_id"] = team_id.strip()
+    return body
+
+
 __all__ = [
     "LITELLM_MODEL_ROUTES",
+    "MCP_NO_LLM_MODELS",
     "TEAM_LIST_PATH",
     "build_key_generate_body",
+    "build_mcp_key_generate_body",
     "match_team_id",
+    "mcp_key_generate_path",
     "parse_team_list",
     "route_models_for_litellm",
 ]

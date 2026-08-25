@@ -343,7 +343,9 @@ def _provider_base(kind: str, environment: str | None) -> tuple[str, str, str]:
     if kind == "litellm":
         path = os.getenv("LITELLM_KEY_GENERATE_PATH", "/key/generate").strip() or "/key/generate"
         return base, key, path
-    path = os.getenv("MCP_GATEWAY_KEY_CREATE_PATH", "/mcp/keys/create").strip() or "/mcp/keys/create"
+    from ..core.litellm.generate_key import mcp_key_generate_path
+
+    path = mcp_key_generate_path(os.getenv("MCP_GATEWAY_KEY_CREATE_PATH"))
     return base, key, path
 
 
@@ -381,7 +383,10 @@ async def _provision_credential(
     if base and path and credential:
         import httpx
 
-        from ..core.litellm.generate_key import build_key_generate_body
+        from ..core.litellm.generate_key import (
+            build_key_generate_body,
+            build_mcp_key_generate_body,
+        )
 
         url = f"{base}{path if path.startswith('/') else '/' + path}"
         metadata = {
@@ -395,16 +400,16 @@ async def _provision_credential(
         )
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                team_name = (getattr(row, "litellm_team_id", None) or "").strip()
+                resolved_team = ""
+                if team_name:
+                    resolved_team = await _resolve_litellm_team_id(
+                        client,
+                        base=base,
+                        credential=credential,
+                        team_name=team_name,
+                    )
                 if kind == "litellm":
-                    team_name = (getattr(row, "litellm_team_id", None) or "").strip()
-                    resolved_team = ""
-                    if team_name:
-                        resolved_team = await _resolve_litellm_team_id(
-                            client,
-                            base=base,
-                            credential=credential,
-                            team_name=team_name,
-                        )
                     body = build_key_generate_body(
                         key_alias=alias,
                         models=list(row.models or []),
@@ -413,16 +418,24 @@ async def _provision_credential(
                         metadata=metadata,
                     )
                 else:
-                    body = {
-                        "key_alias": alias,
-                        "models": row.models or [],
-                        "metadata": metadata,
-                    }
+                    server = (getattr(row, "mcp_server_slug", None) or "").strip()
+                    if not server:
+                        raise PermanentError("mcp provision: mcp_server_slug boş")
+                    body = build_mcp_key_generate_body(
+                        key_alias=alias,
+                        server_slug=server,
+                        tool_names=list(row.mcp_tool_names or []),
+                        all_tools=bool(row.all_tools),
+                        metadata=metadata,
+                        team_id=resolved_team or None,
+                    )
                 response = await client.post(
                     url,
                     headers={"Authorization": f"Bearer {credential}"},
                     json=body,
                 )
+        except PermanentError:
+            raise
         except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
             litellm_log.error(
                 "LiteLLM unreachable %s: %s",
@@ -430,15 +443,21 @@ async def _provision_credential(
                 extra={"kind": kind, "request_id": str(request_id)},
             )
             raise RetryHeld(f"{kind} unavailable: {exc}") from exc
+        snippet = (response.text or "")[:500]
         litellm_log.info(
             "LiteLLM %s → HTTP %s",
             url, response.status_code,
             extra={"kind": kind, "request_id": str(request_id), "status": response.status_code},
         )
         if response.status_code in {429, 502, 503, 504}:
-            raise RetryHeld(f"{kind} http {response.status_code}")
-        if response.status_code in {400, 401, 403}:
-            raise PermanentError(f"{kind} http {response.status_code}")
+            raise RetryHeld(f"{kind} http {response.status_code}: {snippet}")
+        if response.status_code >= 400:
+            litellm_log.error(
+                "LiteLLM %s body: %s",
+                url, snippet,
+                extra={"kind": kind, "request_id": str(request_id)},
+            )
+            raise PermanentError(f"{kind} http {response.status_code}: {snippet}")
         try:
             data = response.json()
         except ValueError as exc:
