@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS mail_messages (
     read_by_user_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT mail_messages_delivery_status_check
-        CHECK (delivery_status IN ('pending', 'sent', 'failed', 'skipped')),
+        CHECK (delivery_status IN ('pending', 'sent', 'failed', 'skipped'))
 );
 """
 

@@ -12,7 +12,7 @@ Transaction sınırı çağıranındadır (`session` flush/rollback'in sahibi
 route handler veya use-case).
 
 ORM model tarafı: `data.db.models.mail_jwt_tokens.MailJwtToken`.
-DDL migration: repo kökü `db_schema_update_notes.md`.
+DDL: `backend/src/data/schemas/postgresql/tables/mail_jwt_tokens.py`.
 """
 
 from __future__ import annotations

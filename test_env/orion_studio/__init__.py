@@ -6,6 +6,8 @@
 
 from ._signing import (
     DEFAULT_API_BASE_URL,
+    DEFAULT_FRONTEND_BASE_URL,
+    DEFAULT_MOCK_URL,
     load_backend_env,
     make_signature,
     now_iso,
@@ -15,6 +17,8 @@ from ._signing import (
 
 __all__ = [
     "DEFAULT_API_BASE_URL",
+    "DEFAULT_FRONTEND_BASE_URL",
+    "DEFAULT_MOCK_URL",
     "load_backend_env",
     "make_signature",
     "now_iso",

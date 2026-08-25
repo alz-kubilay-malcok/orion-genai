@@ -154,13 +154,61 @@ def _flyway_sqlite(url: str) -> list[str]:
         conn.close()
 
 
+def _asyncpg_dsn(url: str) -> str:
+    """SQLAlchemy DSN → asyncpg DSN (``postgresql+asyncpg://`` kabul etmez)."""
+    for prefix in ("postgresql+asyncpg://", "postgres+asyncpg://"):
+        if url.startswith(prefix):
+            return "postgresql://" + url[len(prefix):]
+    return url
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Top-level ``;`` splitter; ``$$`` dollar-quote bloklarını korur."""
+    parts: list[str] = []
+    buf: list[str] = []
+    i = 0
+    in_dollar = False
+    while i < len(sql):
+        if sql.startswith("$$", i):
+            in_dollar = not in_dollar
+            buf.append("$$")
+            i += 2
+            continue
+        if sql[i] == ";" and not in_dollar:
+            chunk = "".join(buf).strip()
+            if chunk:
+                parts.append(chunk)
+            buf = []
+            i += 1
+            continue
+        buf.append(sql[i])
+        i += 1
+    chunk = "".join(buf).strip()
+    if chunk:
+        parts.append(chunk)
+    return parts
+
+
+class _BufferedConnection:
+    """``Migration.apply`` sync ``execute(sql)`` çağırır; SQL'i biriktirir."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute(self, sql: str, *args: object) -> None:
+        if args:
+            msg = "flyway buffered execute parametreli SQL desteklemiyor"
+            raise TypeError(msg)
+        self.statements.append(sql)
+
+
 # ---- Public async PostgreSQL runner -----------------------------------
 
 async def _flyway_postgres(url: str) -> list[str]:
     """asyncpg url → uygulanan migration listesi (kronolojik)."""
     import asyncpg
 
-    conn = await asyncpg.connect(url)
+    conn = await asyncpg.connect(_asyncpg_dsn(url))
     try:
         dialect = "postgresql"
         await _ensure_history_async(conn, dialect)
@@ -209,9 +257,11 @@ async def _apply_migration_async(conn: Any, dialect: str, mig: Migration) -> Non
         raise FlywayError(msg, mig.name)
     start = time.monotonic()
     try:
-        # mig.apply asyncpg.Connection üzerinde `execute(sql)` çağırır;
-        # verilen DDL tek statement olduğu için yeterli.
-        mig.apply(conn, dialect)
+        buffered = _BufferedConnection()
+        mig.apply(buffered, dialect)
+        for script in buffered.statements:
+            for statement in _split_sql_statements(script):
+                await conn.execute(statement)
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - start) * 1000)
         msg = (

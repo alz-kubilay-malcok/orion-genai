@@ -1,4 +1,13 @@
-# Backend Implementation Plan — Tier 1 (Production-Ready Push)
+# Backend Implementation Plan — SUPERSEDED
+
+> Bu dosya 2026-08-25 hexagonal/ports planıdır ve **atlanmıştır**.
+> Güncel rota: pragmatic FastAPI (`backend.src.*` routes → services →
+> SQLAlchemy), basic LDAP (`LDAP_ADMIN_GROUP` → `is_superuser`).
+> Ürün sözleşmesi: [`../baseline.md`](../baseline.md).
+
+---
+
+
 
 **Sahip:** backend-core  
 **Tarih:** 2026-08-25  

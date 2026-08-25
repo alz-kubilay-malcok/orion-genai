@@ -23,6 +23,7 @@ from .mail_messages import mail_messages_migration
 from .outbox_jobs import outbox_jobs_migration
 from .request_revisions import request_revisions_migration
 from .requests import requests_migration
+from .requests_litellm_team import requests_litellm_team_migration
 from .secrets import secrets_migration
 from .secrets_request_type_guard import secrets_guard_migration
 from .worker_heartbeats import worker_heartbeats_migration
@@ -46,6 +47,7 @@ MIGRATIONS: list[Migration] = [
     secrets_guard_migration,
     mail_jwt_tokens_migration,
     auth_security_migration,
+    requests_litellm_team_migration,
 ]
 
 __all__ = ["MIGRATIONS"]

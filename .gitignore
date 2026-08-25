@@ -62,3 +62,11 @@ logs/
 
 # ---- Misc ----
 .asd_decoded.md
+
+# ---- Local mailbox sink (placeholder mailer) ----
+test_env/mailbox/*.json
+test_env/mailbox/*.html
+!test_env/mailbox/.gitkeep
+
+# ---- Mock LiteLLM local state ----
+test_env/mock_litellm/_data/

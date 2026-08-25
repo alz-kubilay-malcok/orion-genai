@@ -15,13 +15,13 @@ Subcommands:
 * ``seed``    — POST one webhooks/orion request per kip türü via ``seed_demo``.
 * ``check``   — smoke probes: GET /health/live + GET / on the mock + GET /_stcore/health on the panel.
 
-Examples (run with the system Python that has streamlit + uvicorn, e.g. ``py -3.14``)::
+Examples::
 
-    py -3.14 test_env/main.py              # boot everything
-    py -3.14 test_env/main.py mock         # only the API mock
-    py -3.14 test_env/main.py panel        # only the UI
-    py -3.14 test_env/main.py seed         # POST 3 seeded requests
-    py -3.14 test_env/main.py check        # print liveness of running services
+    python test_env/main.py              # mock + panel
+    python test_env/main.py mock         # only LiteLLM mock
+    python test_env/main.py panel        # only Streamlit
+    python test_env/main.py seed         # POST 3 signed webhooks
+    python test_env/main.py check        # liveness of running services
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ if _SCRIPTS not in sys.path:
 
 REPO_ROOT = str(Path(_HERE).resolve().parent)
 BACKEND_ENV_FILE = os.path.join(REPO_ROOT, "backend", ".env")
+TEST_ENV_FILE = os.path.join(_HERE, ".env")
 PANEL_ENTRY = os.path.join(_HERE, "orion_studio", "app.py")
 
 MOCK_HOST = "127.0.0.1"
@@ -61,7 +62,9 @@ PANEL_PORT = 8501
 #   `cd backend && python main.py [api|worker|all]` ile ayaga kaldiriyorsun.
 # Bu sabit sadece `cmd check` ile backend ayakta mi diye kontrol amacli kullaniliyor.
 BACKEND_HOST = "127.0.0.1"
-BACKEND_PORT = 8001
+BACKEND_PORT = 8000
+FRONTEND_HOST = "127.0.0.1"
+FRONTEND_PORT = 3000
 
 
 # Avoid routing localhost through Allianz corp proxy
@@ -77,12 +80,10 @@ os.environ["NO_PROXY"] = ",".join(sorted(parts))
 _LOADED_FROM_FILE: set[str] = set()
 
 
-def _load_backend_env() -> dict[str, str]:
-    """Tiny .env loader (KEY=VALUE, ignores blank lines + ``export``/``set``)."""
-    env: dict[str, str] = {}
-    if not os.path.isfile(BACKEND_ENV_FILE):
-        return env
-    with open(BACKEND_ENV_FILE, encoding="utf-8") as fh:
+def _ingest_env_file(path: str, env: dict[str, str], *, override: bool = False) -> None:
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as fh:
         for raw in fh:
             line = raw.strip()
             if not line or line.startswith("#"):
@@ -95,8 +96,18 @@ def _load_backend_env() -> dict[str, str]:
             value = value.strip().strip('"').strip("'")
             key = key.strip()
             env[key] = value
-            os.environ.setdefault(key, value)
-    _LOADED_FROM_FILE.update(env)
+            if override:
+                os.environ[key] = value
+            else:
+                os.environ.setdefault(key, value)
+            _LOADED_FROM_FILE.add(key)
+
+
+def _load_backend_env() -> dict[str, str]:
+    """Load backend/.env then test_env/.env (studio overlay wins)."""
+    env: dict[str, str] = {}
+    _ingest_env_file(BACKEND_ENV_FILE, env)
+    _ingest_env_file(TEST_ENV_FILE, env, override=True)
     return env
 
 
@@ -106,7 +117,7 @@ def _print_env_summary() -> None:
         "GENAI_ORION_PANEL_WEBHOOK_SECRET",
         "ORION_STUDIO_API_BASE",
     )
-    print("[env] backend .env loaded from", BACKEND_ENV_FILE)
+    print("[env] loaded", BACKEND_ENV_FILE, "then", TEST_ENV_FILE)
     for key in keys:
         value = os.environ.get(key)
         if value:
@@ -178,14 +189,14 @@ def start_backend_healthcheck() -> None:
     except Exception as exc:  # noqa: BLE001
         print(
             f"[check] backend             DOWN    (kendi terminalinde "
-            f"`cd backend && python main.py` calistir)  ({exc.__class__.__name__})"
+            f"`cd backend && python main.py` calistir veya compose)  ({exc.__class__.__name__})"
         )
 
 
 def start_panel() -> subprocess.Popen[bytes]:
     env = os.environ.copy()
-    # Make ``orion_studio`` importable when Streamlit launches ``app.py``
-    # as a top-level script (cwd is the repo root, not test_env/).
+    # Make ``orion_studio`` importable. cwd is the studio folder so
+    # ``.streamlit/config.toml`` applies; PYTHONPATH still includes test_env/.
     existing_pp = env.get("PYTHONPATH", "")
     parts = [p for p in existing_pp.split(os.pathsep) if p] if existing_pp else []
     if _HERE not in parts:
@@ -208,7 +219,7 @@ def start_panel() -> subprocess.Popen[bytes]:
             "--browser.gatherUsageStats",
             "false",
         ],
-        cwd=REPO_ROOT,
+        cwd=os.path.join(_HERE, "orion_studio"),
         env=env,
     )
     _wait_for_http(
@@ -279,8 +290,9 @@ def cmd_all(_args: argparse.Namespace) -> int:
     print("=" * 60)
     print(f"Mock LiteLLM:    http://{MOCK_HOST}:{MOCK_PORT}")
     print(f"Streamlit panel: http://{PANEL_HOST}:{PANEL_PORT}")
-    print("Backend'i sen ayri terminalinda baslatiyorsun:")
-    print("    cd backend && python main.py all")
+    print(f"API beklenen:    http://{BACKEND_HOST}:{BACKEND_PORT}")
+    print(f"Frontend:        http://{FRONTEND_HOST}:{FRONTEND_PORT}")
+    print("API + worker + frontend'i ayri baslatin (compose veya local).")
     print("Press Ctrl+C to stop mock + panel.")
     print("=" * 60)
     start_backend_healthcheck()
@@ -328,9 +340,9 @@ def cmd_check(_args: argparse.Namespace) -> int:
     _print_env_summary()
     probes = (
         (f"http://{MOCK_HOST}:{MOCK_PORT}/health/live", "mock-litellm"),
-        (f"http://{MOCK_HOST}:{MOCK_PORT}/key/info", "mock-litellm-admin"),
-        (f"http://{MOCK_HOST}:{MOCK_PORT}/__mock/state", "mock-litellm-debug"),
         (f"http://{PANEL_HOST}:{PANEL_PORT}/_stcore/health", "streamlit-panel"),
+        (f"http://{BACKEND_HOST}:{BACKEND_PORT}/health/live", "backend-api"),
+        (f"http://{FRONTEND_HOST}:{FRONTEND_PORT}/", "frontend"),
     )
     for url, label in probes:
         try:
@@ -349,13 +361,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="test_env.main",
         description=(
             "Boot the test_env harness.\n"
-            "default = 'all' (mock + backend(api+worker) + panel).\n"
-            "Tek terminal, tek Ctrl+C ile üçü de kapanır."
+            "default = 'all' (mock LiteLLM + Streamlit panel).\n"
+            "API/worker/frontend ayri calisir (8056/8058)."
         ),
     )
     sub = parser.add_subparsers(dest="cmd", required=False)
 
-    sub.add_parser("all", help="mock + backend(all) + panel (default)").set_defaults(
+    sub.add_parser("all", help="mock LiteLLM + Streamlit panel (default)").set_defaults(
         func=cmd_all
     )
 

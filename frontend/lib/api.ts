@@ -7,7 +7,7 @@ import {
 } from "./actionSchema";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8001";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8056";
 
 export type FetchApprovalResult =
   | { ok: true; data: ApprovalViewModel }
@@ -59,8 +59,8 @@ export type ApproveBody = {
 export type ReviseBody = {
   token: string;
   request_version: number;
-  tpm_approved: number;
-  rpm_approved: number;
+  team_id: string;
+  max_parallel_requests: number;
   admin_note?: string;
   /** Client-facing: booklisteler. None=field'a dokunulmaz; boş array=bilinçli sıfırlama. */
   models?: string[] | null;

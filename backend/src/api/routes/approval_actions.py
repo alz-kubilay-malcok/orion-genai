@@ -29,6 +29,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from backend.src.api.utils import admin_service
+from backend.src.api.utils.action_tokens import (
+    consume_winning_token,
+    verify_token_against_db,
+)
 from backend.src.api.utils.schemas.actions import (
     ApprovalViewModel,
     PostApproveBody,
@@ -63,8 +67,7 @@ def _row_to_detail_dict(row: Request) -> dict:
         "use_case", "models", "response_window", "usage_frequency",
         "estimated_daily_requests", "max_concurrent_requests",
         "input_pages", "output_pages", "estimated_tokens_per_request",
-        "estimated_peak_rpm", "estimated_peak_tpm",
-        "tpm_approved", "rpm_approved", "key_alias",
+        "key_alias", "litellm_team_id",
         "mcp_server_slug", "mcp_tool_names", "all_tools",
         "registry_allows_all_tools",
         "mcp_server_display_name", "project_name", "technical_owner_email",
@@ -81,7 +84,10 @@ async def get_action_view(
     """JSON view — viewer frontend için read-only snapshot (side effect yok)."""
     state: AppState = request.app.state.container
     try:
-        claims = state.token_signer.verify(token)
+        async with state.session_factory() as session:
+            claims, _row = await verify_token_against_db(
+                session, state.token_signer, token,
+            )
     except InvalidActionTokenError:
         return JSONResponse(
             status_code=401, content={"error_code": "INVALID_ACTION_TOKEN"},
@@ -131,19 +137,13 @@ async def post_approve(request: FastAPIRequest) -> JSONResponse:
 
     state: AppState = request.app.state.container
     try:
-        claims = state.token_signer.verify(body.token)
-        request_id = UUID(claims["request_id"])
-    except (InvalidActionTokenError, KeyError, ValueError) as exc:
-        return JSONResponse(
-            status_code=_DOMAIN_ERROR_STATUS.get("INVALID_ACTION_TOKEN", 401),
-            content={"error_code": "INVALID_ACTION_TOKEN", "detail": str(exc)},
-        )
-
-    actor_id = f"token:{claims.get('sub', 'unknown')}"
-    correlation_id = getattr(request.state, "correlation_id", None)
-
-    try:
         async with state.session_factory() as session:
+            claims, token_row = await verify_token_against_db(
+                session, state.token_signer, body.token, expected_action="approve",
+            )
+            request_id = UUID(claims["request_id"])
+            actor_id = f"token:{claims.get('sub', 'mail')}"
+            correlation_id = getattr(request.state, "correlation_id", None)
             result = await admin_service.admin_approve(
                 session,
                 request_id=request_id,
@@ -152,6 +152,13 @@ async def post_approve(request: FastAPIRequest) -> JSONResponse:
                 actor_id=actor_id,
                 correlation_id=correlation_id,
             )
+            await consume_winning_token(session, token_row)
+            await session.commit()
+    except (InvalidActionTokenError, KeyError, ValueError) as exc:
+        return JSONResponse(
+            status_code=_DOMAIN_ERROR_STATUS.get("INVALID_ACTION_TOKEN", 401),
+            content={"error_code": "INVALID_ACTION_TOKEN", "detail": str(exc)},
+        )
     except DomainError as exc:
         return JSONResponse(
             status_code=_DOMAIN_ERROR_STATUS.get(exc.error_code, 422),
@@ -164,35 +171,29 @@ async def post_approve(request: FastAPIRequest) -> JSONResponse:
 
 @router.post("/revise", response_model=None)
 async def post_revise(request: FastAPIRequest) -> JSONResponse:
-    """LiteLLM-only: positive tpm/rpm approved limits persist + provision enqueue.
+    """LiteLLM-only: team_id + max_parallel_requests persist + provision enqueue.
 
     Body'de opsiyonel ``models`` / ``response_window`` / ``usage_frequency``
     alanları requestera bildirilecek client-facing düzeltmelerdir; verilmediğinde
-    alana dokunulmaz. Operasyonel ``tpm_approved`` / ``rpm_approved`` zorunludur.
+    alana dokunulmaz.
     """
     body = PostReviseBody.model_validate(await request.json())
 
     state: AppState = request.app.state.container
     try:
-        claims = state.token_signer.verify(body.token)
-        request_id = UUID(claims["request_id"])
-    except (InvalidActionTokenError, KeyError, ValueError) as exc:
-        return JSONResponse(
-            status_code=_DOMAIN_ERROR_STATUS.get("INVALID_ACTION_TOKEN", 401),
-            content={"error_code": "INVALID_ACTION_TOKEN", "detail": str(exc)},
-        )
-
-    actor_id = f"token:{claims.get('sub', 'unknown')}"
-    correlation_id = getattr(request.state, "correlation_id", None)
-
-    try:
         async with state.session_factory() as session:
+            claims, token_row = await verify_token_against_db(
+                session, state.token_signer, body.token, expected_action="revise",
+            )
+            request_id = UUID(claims["request_id"])
+            actor_id = f"token:{claims.get('sub', 'mail')}"
+            correlation_id = getattr(request.state, "correlation_id", None)
             result = await admin_service.admin_revise(
                 session,
                 request_id=request_id,
                 request_version=body.request_version,
-                tpm_approved=body.tpm_approved,
-                rpm_approved=body.rpm_approved,
+                team_id=body.team_id,
+                max_parallel_requests=body.max_parallel_requests,
                 admin_note=body.admin_note,
                 models=body.models,
                 response_window=body.response_window,
@@ -200,6 +201,13 @@ async def post_revise(request: FastAPIRequest) -> JSONResponse:
                 actor_id=actor_id,
                 correlation_id=correlation_id,
             )
+            await consume_winning_token(session, token_row)
+            await session.commit()
+    except (InvalidActionTokenError, KeyError, ValueError) as exc:
+        return JSONResponse(
+            status_code=_DOMAIN_ERROR_STATUS.get("INVALID_ACTION_TOKEN", 401),
+            content={"error_code": "INVALID_ACTION_TOKEN", "detail": str(exc)},
+        )
     except DomainError as exc:
         return JSONResponse(
             status_code=_DOMAIN_ERROR_STATUS.get(exc.error_code, 422),
@@ -218,19 +226,13 @@ async def post_reject(request: FastAPIRequest) -> JSONResponse:
 
     state: AppState = request.app.state.container
     try:
-        claims = state.token_signer.verify(body.token)
-        request_id = UUID(claims["request_id"])
-    except (InvalidActionTokenError, KeyError, ValueError) as exc:
-        return JSONResponse(
-            status_code=_DOMAIN_ERROR_STATUS.get("INVALID_ACTION_TOKEN", 401),
-            content={"error_code": "INVALID_ACTION_TOKEN", "detail": str(exc)},
-        )
-
-    actor_id = f"token:{claims.get('sub', 'unknown')}"
-    correlation_id = getattr(request.state, "correlation_id", None)
-
-    try:
         async with state.session_factory() as session:
+            claims, token_row = await verify_token_against_db(
+                session, state.token_signer, body.token, expected_action="reject",
+            )
+            request_id = UUID(claims["request_id"])
+            actor_id = f"token:{claims.get('sub', 'mail')}"
+            correlation_id = getattr(request.state, "correlation_id", None)
             result = await admin_service.admin_reject(
                 session,
                 request_id=request_id,
@@ -239,6 +241,13 @@ async def post_reject(request: FastAPIRequest) -> JSONResponse:
                 actor_id=actor_id,
                 correlation_id=correlation_id,
             )
+            await consume_winning_token(session, token_row)
+            await session.commit()
+    except (InvalidActionTokenError, KeyError, ValueError) as exc:
+        return JSONResponse(
+            status_code=_DOMAIN_ERROR_STATUS.get("INVALID_ACTION_TOKEN", 401),
+            content={"error_code": "INVALID_ACTION_TOKEN", "detail": str(exc)},
+        )
     except DomainError as exc:
         return JSONResponse(
             status_code=_DOMAIN_ERROR_STATUS.get(exc.error_code, 422),

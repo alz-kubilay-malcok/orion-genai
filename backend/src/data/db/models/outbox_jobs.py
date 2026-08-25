@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, text
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
-from ..types import UtcDateTime, Uuid, TzOptionalDateTime
+from ..types import JsonText, OUTBOX_STATUS, UtcDateTime, Uuid, TzOptionalDateTime
 
 
 class OutboxJob(Base):
@@ -35,10 +35,10 @@ class OutboxJob(Base):
     aggregate_id: Mapped[Optional[Uuid]] = mapped_column(
         Uuid, ForeignKey("requests.id", ondelete="CASCADE"),
     )
-    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[str] = mapped_column(JsonText, nullable=False)
     dedupe_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     status: Mapped[str] = mapped_column(
-        String(16), nullable=False, server_default="pending",
+        OUTBOX_STATUS, nullable=False, server_default="pending",
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("5"))

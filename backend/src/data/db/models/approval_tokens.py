@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, ForeignKey, LargeBinary, String, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, ForeignKey, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
-from ..types import UtcDateTime, Uuid
+from ..types import REQUEST_TYPE, UtcDateTime, Uuid
 
 
 class ApprovalToken(Base):
@@ -33,7 +33,7 @@ class ApprovalToken(Base):
     request_id: Mapped[Uuid] = mapped_column(
         Uuid, ForeignKey("requests.id", ondelete="CASCADE"), nullable=False,
     )
-    request_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    request_type: Mapped[str] = mapped_column(REQUEST_TYPE, nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
     issued_at: Mapped[UtcDateTime] = mapped_column(UtcDateTime, nullable=False)

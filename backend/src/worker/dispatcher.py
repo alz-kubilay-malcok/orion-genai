@@ -109,10 +109,19 @@ class OutboxDispatcher:
         """Tek bir döngü adımı — claim + handle batch.
 
         Returns: dispatch edilen job sayısı.
+        ``asyncio.run`` her çağrıda yeni loop açar; SQLAlchemy async
+        engine ilk loop'a bağlı kalır. Uzun ömürlü worker
+        ``tick_async`` kullanmalı.
         """
         lease = timedelta(seconds=self._config.lease_seconds)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         return asyncio.run(self._tick_async(lease, now))
+
+    async def tick_async(self) -> int:
+        """``tick`` — mevcut event loop üzerinde (engine ile aynı loop)."""
+        lease = timedelta(seconds=self._config.lease_seconds)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return await self._tick_async(lease, now)
 
     # ---- async iç iskelet ---------------------------------------------
 

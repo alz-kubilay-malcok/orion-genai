@@ -15,7 +15,7 @@ const REQUEST_TYPES = [
     icon: KeyRound,
     title: "LiteLLM API Anahtarı",
     description:
-      "Model çağrısı için ihtiyaç duyulan anahtar talepleri; departman, model seti ve TPM/RPM bilgisi ile gelir.",
+      "Model çağrısı için ihtiyaç duyulan anahtar talepleri; departman, model seti ve eşzamanlı istek limiti ile gelir.",
     type: "litellm_api_anahtari",
   },
   {

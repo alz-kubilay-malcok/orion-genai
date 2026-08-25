@@ -29,15 +29,7 @@ logger = logging.getLogger(__name__)
 # ---- bootstrap admin seed ------------------------------------------------
 
 async def ensure_bootstrap_admin(state: AppState) -> None:
-    """``BOOTSTRAP_ADMIN_*`` env'inden idempotent User + RoleBindings.
-
-    Davranış:
-    - ``bootstrap_admin_enabled=false`` → noop.
-    - Kullanıcı yoksa bcrypt hash ile yaratır.
-    - Rolü: ``is_superuser=True`` + tüm mevcut rollere ``role_bindings``.
-    - Default org/namespace yoksa bu layer sadece user'ı yaratır; admin
-      paneli sonradan mapping kuracak.
-    """
+    """Idempotent local break-glass admin (``is_superuser``, bcrypt hash)."""
     if not state.settings.bootstrap_admin_enabled:
         return
     from backend.src.api.auth.security import hash_password
@@ -51,10 +43,11 @@ async def ensure_bootstrap_admin(state: AppState) -> None:
             select(User).where(User.username == username)
         )).scalar_one_or_none()
         if existing is not None:
-            # Passwd güncellemesi senkron cron'unda değil; sadece hash uydurmuyoruz.
             existing.is_superuser = True
             existing.is_active = True
-            await session.flush()
+            existing.password_hash = hash_password(password)
+            existing.email = email or existing.email
+            await session.commit()
             return
         user = User(
             id=uuid4(),
@@ -70,6 +63,39 @@ async def ensure_bootstrap_admin(state: AppState) -> None:
             await session.commit()
         except IntegrityError:
             await session.rollback()
+
+
+async def ensure_approvers(state: AppState) -> None:
+    """Seed ``config_approvers`` from ``APPROVER_EMAILS`` (comma-separated)."""
+    from backend.src.data.db.models.config_approvers import ConfigApprover
+
+    emails = [
+        part.strip()
+        for part in (state.settings.approver_emails or "").split(",")
+        if part.strip()
+    ]
+    if not emails:
+        return
+    async with state.session_factory() as session:
+        for index, email in enumerate(emails):
+            existing = (await session.execute(
+                select(ConfigApprover).where(
+                    ConfigApprover.email == email,
+                    ConfigApprover.scope == "GENAI_APPROVAL",
+                )
+            )).scalar_one_or_none()
+            if existing is None:
+                session.add(ConfigApprover(
+                    id=uuid4(),
+                    email=email,
+                    scope="GENAI_APPROVAL",
+                    sort_order=index,
+                    is_active=True,
+                ))
+            else:
+                existing.is_active = True
+                existing.sort_order = index
+        await session.commit()
 
 
 # ---- request-time dependencies --------------------------------------------
@@ -120,6 +146,18 @@ async def get_current_user(
     return user
 
 
+async def get_current_superuser(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Admin panel mutations and listings require ``is_superuser``."""
+    if not user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superuser required",
+        )
+    return user
+
+
 async def get_current_settings(request: Request) -> Settings:
     """``AppState.settings``'i route handler'a geçirir (lru_cache bypass)."""
     state: AppState = request.app.state.container
@@ -164,8 +202,10 @@ async def try_get_current_user(
 
 
 __all__ = [
+    "ensure_approvers",
     "ensure_bootstrap_admin",
     "get_current_settings",
+    "get_current_superuser",
     "get_current_user",
     "get_db_session",
     "try_get_current_user",

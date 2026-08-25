@@ -1,7 +1,7 @@
 """Admin action POST payload'ları (Bölüm 10.3).
 
 - Approve: token + request_version (litellm_key ve mcp_key 'de ek olarak yalnız mcp_registry `allows_all_tools`)
-- Revise  : yalnız litellm_key; positive tpm/rpm + bounded note + version.
+- Revise  : yalnız litellm_key; LiteLLM team_id + max_parallel_requests.
 - Reject  : tüm automated tipler; reject_reason 1..2000 char.
 """
 
@@ -28,18 +28,17 @@ class PostApproveBody(BaseModel):
 class PostReviseBody(BaseModel):
     """LiteLLM-only Revise POST gövdesi.
 
-    Client-facing üç alan (``models``, ``response_window``,
-    ``usage_frequency``) opsiyoneldir: body'de geçilirse alan değişir,
-    geçilmezse mevcut değeri korunur (None = no-op). Boş liste/str ise
-    admin bilinçli sıfırlama olarak yorumlanır.
+    `team_id` LiteLLM `/key/generate` team_id (alias da kabul; worker
+    `GET /team/list` ile çözer). `max_parallel_requests` eşzamanlı istek
+    tavanıdır. Client-facing üç alan opsiyoneldir.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     token: str
     request_version: int = Field(ge=0)
-    tpm_approved: int = Field(gt=0)
-    rpm_approved: int = Field(gt=0)
+    team_id: Annotated[str, Field(min_length=1, max_length=128)]
+    max_parallel_requests: int = Field(ge=1)
     admin_note: Annotated[str | None, Field(default=None, max_length=2000)] = None
     models: Annotated[list[str] | None, Field(default=None)] = None
     response_window: Annotated[str | None, Field(default=None, max_length=64)] = None

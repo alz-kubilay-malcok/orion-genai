@@ -1,0 +1,30 @@
+# Build context = repo root (deployment/docker-compose.yml `context: ..`).
+.git
+.gitignore
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/.DS_Store
+
+# Secrets — never COPY into the image
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
+**/*.pem
+**/*.key
+
+frontend/node_modules
+frontend/.next
+frontend/out
+
+# Local smoke / studio — not needed in runtime images
+test_env
+ldap.txt
+*.md
+docs

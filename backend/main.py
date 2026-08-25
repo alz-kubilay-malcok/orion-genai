@@ -2,12 +2,12 @@
 
 Kullanım::
 
+    python main.py all                # migrate + worker + api (yerel smoke)
     python main.py migrate            # DDL/flyway + safety create_all
     python main.py api                # FastAPI (uvicorn, ana thread bloklu)
     python main.py worker             # Outbox worker (WorkerRunner.run_forever)
     python main.py debug-routes       # Mount edilmiş rotaları JSON dump et
-    python main.py defaults           # Tüm sub-command'ı default sırayla koş
-                                      # (önce `migrate`, sonra `worker`)
+    python main.py defaults           # migrate + worker (API yok; compose worker)
     python main.py --help
 
 Her sub-command:
@@ -29,6 +29,7 @@ Her sub-command:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import os
@@ -91,7 +92,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser(
         "defaults",
-        help="Default mod: migrate + worker (compose için uygun)",
+        help="Default mod: migrate + worker (compose worker container)",
+    )
+    sub.add_parser(
+        "all",
+        help="Yerel smoke: migrate + worker (thread) + api",
     )
     return parser
 
@@ -230,19 +235,37 @@ def cmd_defaults(args: argparse.Namespace) -> int:
     return cmd_worker(args)
 
 
+def cmd_all(args: argparse.Namespace) -> int:
+    """Yerel tek process: migrate, worker thread, sonra API (bloklar)."""
+    import threading
+
+    rc = cmd_migrate(args)
+    if rc != 0:
+        return rc
+    worker = threading.Thread(
+        target=cmd_worker,
+        args=(args,),
+        name="outbox-worker",
+        daemon=True,
+    )
+    worker.start()
+    return cmd_api(args)
+
+
 _COMMANDS = {
     "migrate": cmd_migrate,
     "api": cmd_api,
     "worker": cmd_worker,
     "debug-routes": cmd_debug_routes,
     "defaults": cmd_defaults,
+    "all": cmd_all,
 }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    command = args.command or "defaults"
+    command = args.command or "all"
     handler = _COMMANDS.get(command)
     if handler is None:
         parser.error(f"Bilinmeyen alt-komut: {command!r}")

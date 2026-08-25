@@ -17,7 +17,7 @@ import asyncio
 import logging
 import sys
 
-from ..data.db import db_init
+from ..data.db import adb_init
 from ..observability.logging_config import configure_json_logging
 from .config import WorkerConfig
 from .dependencies_factory import build_worker_dependencies
@@ -36,7 +36,7 @@ def main() -> int:
     _configure_logging()
     config = WorkerConfig.from_env()
 
-    built = asyncio.run(db_init.adb_init())
+    built = asyncio.run(adb_init())
     try:
         deps = build_worker_dependencies(
             session_factory=built.session_factory, config=config,

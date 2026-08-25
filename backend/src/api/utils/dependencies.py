@@ -72,8 +72,13 @@ async def build_app_state() -> AppState:
 
     engine = build_async_engine(config)
     session_factory = build_session_factory(engine)
-    # ``HmacTokenSigner`` boş/eksik secret → ``ValueError`` (PR Y sürümü).
-    token_signer = HmacTokenSigner(settings.action_signing_secret)
+    signing_secret = settings.action_signing_secret
+    if not signing_secret:
+        signing_secret = "dev-action-signing-secret-change-me-32b"
+        logger.warning(
+            "ACTION_SIGNING_SECRET empty; using insecure dev default",
+        )
+    token_signer = HmacTokenSigner(signing_secret)
 
     return AppState(
         db_config=config,

@@ -1,24 +1,17 @@
-# GenAiOrionPanel — Frontend (Viewer)
+# GenAi Orion Panel — frontend
 
-Next.js 15 app that renders a read-only approval view fetched from the
-`GenAiOrionPanel` backend (`GET /actions/{token}/view`). No mutation actions
-(approve/reject/revise) live here yet — those remain on the backend's own
-HTML confirmation pages for now (Bölüm 10.3).
+Next.js app: onay ekranı (`/approvals/{token}`) ve admin panel.
 
-## Development
+## Geliştirme
 
-```powershell
+```bash
+cd frontend
 npm install
-cp .env.example .env.local   # adjust NEXT_PUBLIC_API_BASE_URL if needed
+cp .env.example .env.local   # NEXT_PUBLIC_API_BASE_URL=http://localhost:8056
 npm run dev
 ```
 
-Visit `http://localhost:3000/approvals/<token>`.
+Varsayılan: `http://localhost:8058`.
 
-## Structure
-
-- `app/approvals/[token]/page.tsx` — server component that fetches the view model and renders `ApprovalView`.
-- `lib/api.ts` — thin fetch wrapper around the backend API.
-- `lib/actionSchema.ts` — Zod schema validating the `ApprovalViewModel` JSON contract.
-- `components/ApprovalView.tsx` — presentational component for the fetched data.
-- `components/ResultBanner.tsx` — error/empty-state banner.
+Onay: `http://localhost:8058/approvals/<token>`
+Admin: `http://localhost:8058/admin` (bootstrap superuser).

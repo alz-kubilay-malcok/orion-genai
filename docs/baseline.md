@@ -6,7 +6,7 @@
 **Architecture:** modular monolith, hexagonal architecture, transactional outbox  
 **Deployment:** tek image, ayrı API ve worker process
 
-Orion handoff dokümanları yalnız UX/wire extract'tir: [birleşik Orion paketi](Atlass%20Orion%20Help%20Desk%20GenAi%20Field/orion-ekip-talep.md), [LiteLLM alanları](Atlass%20Orion%20Help%20Desk%20GenAi%20Field/orion-fields.md), [MCP erişim alanları](Atlass%20Orion%20Help%20Desk%20GenAi%20Field/mcp-key-fields.md) ve [MCP kayıt alanları](Atlass%20Orion%20Help%20Desk%20GenAi%20Field/mcp-server-registry-fields.md). Historical SDD, schema çizimleri, SQL taslakları ve diğer Markdown dosyaları bu dosyayı override edemez. Çelişkide `OVERALL.md` uygulanır. Handoff extract'leri bu baseline'dan üretilir veya bununla senkron tutulur.
+Orion JSON alan şekli: [genai-orion-panel-talep-key-contract.md](genai-orion-panel-talep-key-contract.md). Historical SDD, şema taslakları ve `docs/dev/` altındaki notlar bu dosyayı override edemez. Çelişkide bu baseline uygulanır.
 
 ---
 
@@ -59,7 +59,7 @@ Registry yalnız zaten deploy edilmiş endpoint'i kaydeder. Kapsam dışında ka
 | ADR-009 | Requester TPM/RPM/token/organization girmez; organization sabit `ALZ` |
 | ADR-010 | GET action endpoint'leri yalnız confirmation/form; mutasyon yalnız POST |
 | ADR-011 | `Revise` yalnız `litellm_key` için geçerlidir; iki MCP tipi yalnız approve/reject destekler |
-| ADR-012 | `OVERALL.md` tek implementation authority'dir |
+| ADR-012 | `docs/baseline.md` tek implementation authority'dir |
 
 Redis ancak ölçülmüş ihtiyaçla eklenir. PostgreSQL request/config store ve durable queue'dur.
 
@@ -357,7 +357,7 @@ Alias normalizasyonu: uppercase, unsupported karakterleri `-`, duplicate separat
 Allianz/
 ├── pyproject.toml
 ├── uv.lock
-├── OVERALL.md
+├── docs/baseline.md
 ├── apps/
 │   ├── api/src/genai_orion_panel_api/
 │   │   ├── main.py

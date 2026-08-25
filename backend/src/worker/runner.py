@@ -14,6 +14,7 @@ Davranış:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import signal
@@ -113,9 +114,7 @@ class WorkerRunner:
             },
         )
         try:
-            while self.is_running:
-                self._safe_tick()
-                self._sleep_or_stop()
+            asyncio.run(self._run_async())
         finally:
             logger.info(
                 "worker durdu",
@@ -125,9 +124,14 @@ class WorkerRunner:
                 },
             )
 
-    def _safe_tick(self) -> None:
+    async def _run_async(self) -> None:
+        while self.is_running:
+            await self._safe_tick_async()
+            await self._async_sleep_or_stop()
+
+    async def _safe_tick_async(self) -> None:
         try:
-            self._last_dispatch = self._dispatcher.tick()
+            self._last_dispatch = await self._dispatcher.tick_async()
             self._processed_total += self._last_dispatch
         except Exception as exc:  # noqa: BLE001 — fail-safe
             logger.error(
@@ -138,16 +142,43 @@ class WorkerRunner:
                 },
                 exc_info=True,
             )
-        # Heartbeat her tick'te yazılır; DB write başarısız olursa tick'i
-        # düşürmeyiz (`_safe_tick` zaten fail-safe), sadece log uyarırız.
-        # `_safe_tick` sync scope'ta; dispatcher's `asyncio.run` çağrısı
-        # burada tamamlanmış, yeni event loop açmamız güvenli.
         if self._heartbeat_callback is not None:
-            self._heartbeat_callback(
-                worker_id=self._dispatcher.worker_id,
-                started_at=self._started_at,
-                last_seen_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            try:
+                result = self._heartbeat_callback(
+                    worker_id=self._dispatcher.worker_id,
+                    started_at=self._started_at,
+                    last_seen_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "heartbeat upsert failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+
+    def _safe_tick(self) -> None:
+        """Sync helper — tek seferlik test/smoke; uzun ömürlü loop değil."""
+        try:
+            self._last_dispatch = self._dispatcher.tick()
+            self._processed_total += self._last_dispatch
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "worker tick patladı",
+                extra={
+                    "worker_id": self._dispatcher.worker_id,
+                    "error": repr(exc),
+                },
+                exc_info=True,
             )
+
+    async def _async_sleep_or_stop(self) -> None:
+        remaining = float(self._config.poll_interval_seconds)
+        while self.is_running and remaining > 0:
+            step = min(0.25, remaining)
+            await asyncio.sleep(step)
+            remaining -= step
 
     def _sleep_or_stop(self) -> None:
         """`poll_interval_seconds` kadar uyur; stop anında erken döner.

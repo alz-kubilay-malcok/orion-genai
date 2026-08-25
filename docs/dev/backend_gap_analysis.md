@@ -1,4 +1,13 @@
-# Backend Gap Analysis & Refactor Plan — Kapanış Snapshot'ı
+# Backend Gap Analysis & Refactor Plan — SUPERSEDED
+
+> Bu dosya 2026-08-25 tarihli kapanış snapshot'ıdır ve **artık
+> implementation authority değildir**. Güncel rota: Cursor plan
+> `backend_yenileme_plani` (pragmatic FastAPI monolith, basic LDAP).
+> Ürün sözleşmesi için [`../baseline.md`](../baseline.md) geçerlidir.
+
+---
+
+
 
 > Tarih: 2026-08-25 · Snapshot: legacy `genai_orion_panel_*` paketleri
 > **yok**; tüm import zincirleri `backend.src.*` üzerinden çözülmektedir.
@@ -13,7 +22,7 @@ Bu doküman, backend tarafında:
 3. **Kırmızı:** sıfırdan yazılması gereken domain/application katmanı parçalarını ve bunların gerektirdiği yeni dosya listesini içerir.
 
 DB migration / seed tarafı bu planda **yoktur** — DB dokunulmaz. `test_env/` ve
-`db_schema_update_notes.md` referans olarak duruyor.
+`docs/dev/db_schema_update_notes.md` referans olarak duruyor.
 
 ---
 

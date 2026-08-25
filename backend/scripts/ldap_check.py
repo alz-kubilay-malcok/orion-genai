@@ -28,7 +28,7 @@ from ldap3 import Server, Connection, ALL, SUBTREE
 from ldap3.core.exceptions import LDAPException
 from backend.src.api.auth.ldap import _preflight, authenticate_ldap
 
-from backend.src.observability.settings import get_settings, reset_settings_cache
+from backend.src.observability.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 async def _step1_tcp(host: str, port: int, timeout: int) -> bool:
     print(f"[1/3] TCP pre-flight {host}:{port} (timeout={timeout}s)...")
     try:
-        await _preflight(host, port, timeout)
+        _preflight(host, port, timeout)
     except Exception as exc:  # noqa: BLE001 — Usage mesajında kapsama alınır
         print(f"  FAIL: {exc}")
         return False
@@ -89,7 +89,7 @@ async def _step3_user_bind(settings, username: str, password: str) -> bool:
     print(f"    username     = {identity.username}")
     print(f"    email        = {identity.email}")
     print(f"    display_name = {identity.display_name}")
-    print(f"    groups       = {identity.member_of[:5]}{' …' if len(identity.member_of) > 5 else ''}")
+    print(f"    groups       = {identity.group_dns[:5]}{' …' if len(identity.group_dns) > 5 else ''}")
     return True
 
 

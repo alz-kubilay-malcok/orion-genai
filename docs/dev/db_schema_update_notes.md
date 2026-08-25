@@ -98,7 +98,7 @@ kontrol edilip boş slot'tan verilecek. `approval_tokens` v17
 - her iki `tables/__init__.py` — registry'ye v14 eklendi
 - `backend/src/core/mailing/jwt_mail.py`             — PyJWT HS256
 - `backend/src/core/mailing/mail_jwt_validator.py`   — DB-backed tek-kullanım
-- `requirements.txt`                                  — `pyjwt>=2.8`
+- `backend/requirements.txt`                          — `pyjwt>=2.8`
 
 ### Open items (apply aşaması dışı, kullanıcı/harness sorumluluğu)
 

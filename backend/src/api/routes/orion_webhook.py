@@ -21,6 +21,8 @@ bu sürüm tek başına uçtan uca çalışır (Smoke:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -68,6 +70,7 @@ class SharedFields(BaseModel):
 
 class LitellmKeyPayload(SharedFields):
     departman_adi: str | None = None
+    ortam: str | None = None
     talep_aciklamasi: str | None = None
     kullanim_amaci: str | None = None
     kullanim_senaryosu: str | None = None
@@ -82,6 +85,7 @@ class LitellmKeyPayload(SharedFields):
 
 class McpKeyPayload(SharedFields):
     departman_adi: str | None = None
+    ortam: str | None = None
     talep_aciklamasi: str | None = None
     kullanim_amaci: str | None = None
     mcp_sunucusu: str | None = None
@@ -91,16 +95,19 @@ class McpKeyPayload(SharedFields):
 
 class McpRegistryPayload(SharedFields):
     departman_adi: str | None = None
+    ortam: str | None = None
     talep_aciklamasi: str | None = None
     kullanim_amaci: str | None = None
-    mcp_sunucusu: str | None = None
+    mcp_sunucu_adi: str | None = None
     mcp_sunucusu_goruntulu_ad: str | None = None
     proje_adi: str | None = None
     teknik_sorumlu_eposta: EmailStr | None = None
     repo_platformu: str | None = None
     repo_url: HttpUrl | None = None
+    devops_jira_no: str | None = None
     devops_jira_anahtari: str | None = None
     mcp_endpoint_url: HttpUrl | None = None
+    minimum_evaluation_skoru: int | None = None
     minimum_degerlendirme_skoru: int | None = None
     ek_notlar: str | None = None
 
@@ -140,6 +147,7 @@ async def _approver_recipients(session) -> list[str]:
 
 _TURKISH_TO_SNAKE: dict[str, str] = {
     "departman_adi": "department_name",
+    "ortam": "environment",
     "talep_aciklamasi": "request_description",
     "kullanim_amaci": "purpose_text",
     "kullanim_senaryosu": "use_case",
@@ -153,13 +161,16 @@ _TURKISH_TO_SNAKE: dict[str, str] = {
     "mcp_sunucusu": "mcp_server_slug",
     "araclar": "mcp_tool_names",
     "tum_araclara_erisim": "all_tools",
+    "mcp_sunucu_adi": "mcp_server_display_name",
     "mcp_sunucusu_goruntulu_ad": "mcp_server_display_name",
     "proje_adi": "project_name",
     "teknik_sorumlu_eposta": "technical_owner_email",
     "repo_platformu": "repo_platform",
     "repo_url": "repo_url",
+    "devops_jira_no": "devops_jira_key",
     "devops_jira_anahtari": "devops_jira_key",
     "mcp_endpoint_url": "mcp_endpoint_url",
+    "minimum_evaluation_skoru": "minimum_evaluation_score",
     "minimum_degerlendirme_skoru": "minimum_evaluation_score",
     "ek_notlar": "additional_notes",
 }
@@ -171,7 +182,7 @@ def _payload_to_request_fields(
     """Pydantic payload → ORM ``requests`` satır field'ları."""
     fields: dict[str, Any] = {
         "request_type": request_type,
-        "status": "received",
+        "status": "waiting_approval",
         "version": 0,
         "genai_orion_panel_ticket_id": payload.talep_no,
         "genai_orion_panel_ticket_url": str(payload.talep_url),
@@ -199,11 +210,50 @@ def _payload_to_request_fields(
         }:
             continue
         fields[snakecase] = v
+    if request_type == "litellm_key":
+        purpose = payload.model_dump().get("kullanim_amaci")
+        if purpose:
+            fields["purpose_code"] = purpose
+        input_pages = float(fields.get("input_pages") or 0)
+        output_pages = float(fields.get("output_pages") or 0)
+        tokens = max(int((input_pages + output_pages) * 1000), 1000)
+        fields["estimated_tokens_per_request"] = tokens
+        if (fields.get("department_name") or "").strip():
+            fields["litellm_team_id"] = str(fields["department_name"]).strip()
+    if request_type in {"litellm_key", "mcp_key"}:
+        from backend.src.core.naming import key_alias_for_request
+
+        fields["key_alias"] = key_alias_for_request(fields, request_type)
     return fields
 
 
-def _viewer_base() -> str:
-    return os.getenv("VIEWER_BASE_URL", "http://localhost:3000/actions")
+def _action_base() -> str:
+    return os.getenv("PUBLIC_ACTION_BASE_URL", "http://localhost:8058/approvals").rstrip("/")
+
+
+def _webhook_signature_failure(request: Request, body: bytes) -> JSONResponse | None:
+    """HMAC-SHA256 over raw body. Empty secret or AUTH_MODE=off → skip (local smoke)."""
+    mode = os.getenv("GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE", "hmac").strip().lower()
+    secret = os.getenv("GENAI_ORION_PANEL_WEBHOOK_SECRET", "").strip()
+    if mode in {"off", "none", "disabled"} or not secret:
+        return None
+    provided = (
+        request.headers.get("x-genai-orion-panel-signature")
+        or request.headers.get("X-GenAi-Orion-Panel-Signature")
+        or ""
+    ).strip()
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    if provided and hmac.compare_digest(provided.lower(), expected.lower()):
+        return None
+    log_event(
+        logger, "orion.webhook.invalid",
+        level=logging.WARNING,
+        error_code="INVALID_WEBHOOK_SIGNATURE",
+    )
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"error_code": "INVALID_WEBHOOK_SIGNATURE"},
+    )
 
 
 @router.post("/orion", status_code=status.HTTP_202_ACCEPTED)
@@ -214,6 +264,7 @@ async def receive_orion_webhook(
     """`POST /webhooks/orion` — validate → INSERT request → outbox mail.
 
     Hata sınıfları:
+    - 401: HMAC imza yok/uyuşmaz (secret set + AUTH_MODE=hmac).
     - 422: bilinmeyen talep_turu, JSON parse, payload schema reddi.
     - 202 (duplicate=True): aynı (ticket_no, request_type) daha önce alındı.
     - 202: yeni istek alındı, N approver mail outbox'a düştü (enqueued=N),
@@ -221,6 +272,24 @@ async def receive_orion_webhook(
     """
     state = request.app.state.container
     factory = state.session_factory
+
+    body = await request.body()
+    rejected = _webhook_signature_failure(request, body)
+    if rejected is not None:
+        return rejected
+
+    try:
+        raw = json.loads(body) if body else None
+    except Exception:  # noqa: BLE001 — parse hatası 422 olarak geri dön.
+        log_event(
+            logger, "orion.webhook.parse_failed",
+            level=logging.WARNING,
+            raw_size=str(request.headers.get("content-length") or "?"),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"error_code": "BAD_JSON", "field_errors": []},
+        )
 
     raw_size_hint = request.headers.get("content-length") or "?"
     log_event(
@@ -231,19 +300,6 @@ async def receive_orion_webhook(
         raw_size=str(raw_size_hint),
         ticket_no=str(raw.get("talep_no", "?")) if isinstance(raw, dict) else "?",
     )
-
-    try:
-        raw = await request.json()
-    except Exception:  # noqa: BLE001 — parse hatası 422 olarak geri dön.
-        log_event(
-            logger, "orion.webhook.parse_failed",
-            level=logging.WARNING,
-            raw_size=str(raw_size_hint),
-        )
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error_code": "BAD_JSON", "field_errors": []},
-        )
 
     talep_turu = raw.get("talep_turu") if isinstance(raw, dict) else None
     if talep_turu not in _SCHEMA_BY_TALEP_TURU:
@@ -325,6 +381,24 @@ async def receive_orion_webhook(
         await repo.save(new_db_request)
         await session.flush()  # PK garantile
 
+        from urllib.parse import quote
+
+        from backend.src.api.utils.action_tokens import compact_of, issue_tokens_for_request
+
+        token_rows = issue_tokens_for_request(
+            state.token_signer,
+            request_id=new_db_request.id,
+            request_type=request_type,
+            ttl_hours=state.settings.action_token_ttl_hours,
+        )
+        action_urls: dict[str, str] = {}
+        base = _action_base()
+        for token_row in token_rows:
+            session.add(token_row)
+            compact = compact_of(token_row)
+            if compact:
+                action_urls[token_row.action] = f"{base}/{quote(compact, safe='.-_')}"
+
         recipients = await _approver_recipients(session)
         enqueued = 0
         for recipient in recipients:
@@ -333,10 +407,11 @@ async def receive_orion_webhook(
                 request_id=new_db_request.id,
                 request_type=request_type,
                 recipient=recipient,
-                viewer_base=_viewer_base(),
-                token="",  # worker step 3 JWT issuer bunu override eder.
+                viewer_base=base,
+                token=compact_of(token_rows[0]) if token_rows else "",
                 required_action="approve",
                 created_by=payload.talep_eden_eposta,
+                action_urls=action_urls,
             )
             enqueued += 1
 
@@ -352,17 +427,9 @@ async def receive_orion_webhook(
     )
     response: dict[str, Any] = {
         "request_id": str(new_db_request.id),
-        "status": "received",
+        "status": "waiting_approval",
         "approver_mails_enqueued": enqueued,
     }
-    if not recipients:
-        logger.warning(
-            "approver listesi boş; outbox'a mail düşmedi",
-            extra={"request_id": str(new_db_request.id),
-                   "request_type": request_type},
-        )
-    # accepted event zaten log_event ile basıldı; aşağıdaki WARNING
-    # approver listesi spesifik durumunu koruyor.
     if not recipients:
         logger.warning(
             "approver listesi boş; outbox'a mail düşmedi",

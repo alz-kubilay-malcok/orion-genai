@@ -1,19 +1,14 @@
 """Mock LiteLLM admin + MCP Gateway API.
 
-This stand-alone FastAPI service imitates the portions of the LiteLLM proxy
-API that `genai_orion_panel_adapters.litellm.*` actually call:
+Worker'ın çağırdığı yüzey:
 
-* `POST /key/generate`                   — `LiteLLMKeyGateway.generate_key`
-* `GET  /key/info`                       — admin visibility in the Streamlit panel
-* `POST /mcp/keys/create`                — `LiteLLMMCPGatewayKeyAdapter.generate_scoped_key`
-* `PUT  /mcp/servers/upsert`             — `LiteLLMMCPGatewayRegistryAdapter.register_or_update`
-* `GET  /mcp/keys`, `GET  /mcp/servers`  — admin views
+* ``POST /key/generate``
+* ``GET  /team/list``
+* ``POST /mcp/keys/create``
+* ``PUT  /mcp/servers/upsert``
 
-Auth: `Authorization: Bearer $LITELLM_ACCESS_KEY`. Set `MOCK_LITELLM_AUTH=off`
-to bypass (handy for manual `curl` testing) — production code always supplies
-a bearer.
-
-State persists to `_data/keys.json` next to this file so re-runs keep history.
+Auth: ``Authorization: Bearer $LITELLM_ACCESS_KEY``.
+``MOCK_LITELLM_AUTH_OFF=1`` ile kapatılır.
 """
 
 from __future__ import annotations
@@ -77,8 +72,8 @@ def _save_state(state: dict[str, Any]) -> None:
 class KeyGenerateRequest(BaseModel):
     key_alias: str = Field(min_length=1)
     models: list[str] = Field(default_factory=list)
-    tpm_limit: int | None = None
-    rpm_limit: int | None = None
+    team_id: str | None = None
+    max_parallel_requests: int | None = None
     duration: str = "90d"
     key_type: str = "llm_api"
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -183,8 +178,8 @@ def create_app() -> FastAPI:
             record = {
                 "key_alias": payload.key_alias,
                 "models": payload.models,
-                "tpm_limit": payload.tpm_limit,
-                "rpm_limit": payload.rpm_limit,
+                "team_id": payload.team_id,
+                "max_parallel_requests": payload.max_parallel_requests,
                 "duration": payload.duration,
                 "key_type": payload.key_type,
                 "metadata": payload.metadata,
@@ -209,6 +204,19 @@ def create_app() -> FastAPI:
             "models": payload.models,
             "expires": _duration_to_iso(payload.duration),
         }
+
+    @application.get("/team/list", dependencies=[Depends(_enforce_auth)])
+    async def team_list() -> dict[str, Any]:
+        """LiteLLM `GET /team/list` şekli — `{teams: [{team_id, team_alias}]}`."""
+        with _STATE_RLOCK:
+            state = _load_state()
+            extra = list(state.get("teams") or [])
+        teams = [
+            {"team_id": "GENAI", "team_alias": "GENAI"},
+            {"team_id": "demo-team", "team_alias": "Demo Team"},
+            *extra,
+        ]
+        return {"teams": teams}
 
     @application.get("/key/info", dependencies=[Depends(_enforce_auth)])
     async def key_info(key_alias: str) -> dict[str, Any]:

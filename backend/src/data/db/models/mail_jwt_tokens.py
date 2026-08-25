@@ -17,7 +17,7 @@ Tip konvansiyonları:
 - `token_hash` `LargeBinary` — sha256(compact_token) (32 byte).
 - `Uuid` cross-dialect UUID tip'i.
 
-DDL migration hâlâ TBD — repo kökü `db_schema_update_notes.md`'ye bak.
+DDL: `backend/src/data/schemas/postgresql/tables/mail_jwt_tokens.py`.
 """
 
 from __future__ import annotations

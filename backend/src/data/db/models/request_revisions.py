@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Integer, Text, UniqueConstraint
+from sqlalchemy import Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
-from ..types import UtcDateTime, Uuid
+from ..types import JsonText, UtcDateTime, Uuid
 
 
 class RequestRevision(Base):
@@ -21,7 +21,7 @@ class RequestRevision(Base):
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True)
     request_id: Mapped[Uuid] = mapped_column(Uuid, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    snapshot: Mapped[str] = mapped_column(Text, nullable=False, server_default="{}")
+    snapshot: Mapped[str] = mapped_column(JsonText, nullable=False, server_default="{}")
     created_at: Mapped[UtcDateTime] = mapped_column(
         UtcDateTime, nullable=False,
     )

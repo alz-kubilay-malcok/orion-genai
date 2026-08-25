@@ -188,12 +188,93 @@ class TzOptionalDateTime(TypeDecorator):
         return value
 
 
+class NativeEnum(TypeDecorator):
+    """PG native ENUM, SQLite VARCHAR. ``create_type=False`` — flyway owns DDL."""
+
+    impl = String
+    cache_ok = False
+
+    def __init__(self, *labels: str, enum_name: str) -> None:
+        super().__init__()
+        self._labels = labels
+        self._enum_name = enum_name
+
+    def load_dialect_impl(self, dialect):  # type: ignore[override]
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(
+                postgresql.ENUM(
+                    *self._labels,
+                    name=self._enum_name,
+                    create_type=False,
+                )
+            )
+        return dialect.type_descriptor(String(32))
+
+
+REQUEST_TYPE = NativeEnum(
+    "litellm_key", "mcp_key", "mcp_server_registry", "chatbot_support",
+    enum_name="request_type",
+)
+REQUEST_STATUS = NativeEnum(
+    "received", "waiting_approval", "assigned",
+    "provisioning", "completed", "rejected", "failed", "expired",
+    enum_name="request_status",
+)
+ENVIRONMENT = NativeEnum("DEV", "STG", "TEST", "PROD", enum_name="environment")
+REPO_PLATFORM = NativeEnum("GITHUB", "BITBUCKET", enum_name="repo_platform")
+OUTBOX_STATUS = NativeEnum(
+    "pending", "processing", "retry", "completed", "dead_letter",
+    enum_name="outbox_status",
+)
+
+
+class JsonText(TypeDecorator):
+    """Python JSON string; PG JSONB, SQLite TEXT.
+
+    Bind: str → parsed object on PG. Result: object → dumped str so
+    existing ``json.loads(row.payload)`` callers keep working.
+    """
+
+    impl = Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):  # type: ignore[override]
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(postgresql.JSONB())
+        return dialect.type_descriptor(Text())
+
+    def process_bind_param(self, value, dialect):  # type: ignore[override]
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, default=str)
+        return value
+
+    def process_result_value(self, value, dialect):  # type: ignore[override]
+        if value is None:
+            return None
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, default=str)
+        return value
+
+
 __all__ = [
     "Uuid",
     "JsonEncodedList",
     "JsonEncodedDict",
+    "JsonText",
     "UtcDateTime",
     "TzOptionalDateTime",
+    "NativeEnum",
+    "REQUEST_TYPE",
+    "REQUEST_STATUS",
+    "ENVIRONMENT",
+    "REPO_PLATFORM",
+    "OUTBOX_STATUS",
 ]
 
 

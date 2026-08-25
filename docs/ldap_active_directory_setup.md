@@ -1,10 +1,10 @@
 # LDAP / Active Directory Setup
 
 GenAiOrionPanel — kurumsal dizin servisi entegrasyonu için operatör
-notu. **Kılavuz §7'nin uygulamaya özgü parçasıdır**; LDAP bağlantı
-kontratı için [`../src/api/auth/ldap.py`](../../src/api/auth/ldap.py)
+notu. Ürün sözleşmesi [`baseline.md`](baseline.md); LDAP bağlantı
+kontratı için [`backend/src/api/auth/ldap.py`](../backend/src/api/auth/ldap.py)
 ve env referansı için
-[`../src/observability/settings.py`](../../src/observability/settings.py)
+[`backend/src/observability/settings.py`](../backend/src/observability/settings.py)
 "single source of truth"tır.
 
 ## 1. Domain Controller tarafı — AD üzerinde bir Read-Only
@@ -43,11 +43,16 @@ New-ADUser `
 > konteyner secret'ı olarak push'lanır. Bu komut tekrar çalıştırılırsa
 > eski hesap silinmez, yeni bir hesap açılır (failover).
 
-## 2. .env dosyası — backend/.env
+## 2. .env dosyası — deployment/.env
 
-Aşağıdaki anahtarlar `backend/.env` dosyasına yazılır. Production'da
+LDAP sırları `deployment/.env` içindedir (compose `env_file`).
+`docker-compose.yml` `environment:` bloğuna `LDAP_*` yazılmaz — bind
+parolasındaki `$` compose interpolasyonu ile bozulur. Production'da
 CI/CD secrets manager'dan inject edilir; asla commit edilmez
 ([.gitignore](.gitignore) zaten `.env`'i exclude eder).
+
+Şablon: [`deployment/.env.example`](../../../deployment/.env.example).
+CA PEM: `deployment/certs/` → container `/etc/ssl/corp/`.
 
 ```ini
 # JWT — login imzalama
@@ -78,7 +83,8 @@ LDAP_REQUIRED_GROUP=CN=GenAiOrionPanel-Users,OU=Groups,DC=corp,DC=example,DC=loc
 LDAP_USER_ATTR=sAMAccountName
 LDAP_MAIL_ATTR=mail
 LDAP_DISPLAY_NAME_ATTR=displayName
-LDAP_OBJECT_CLASS=person
+LDAP_OBJECT_CLASS=user
+LDAP_ADMIN_GROUP=CN=GenAiOrionPanel-Admins,OU=Groups,DC=corp,DC=example,DC=local
 LDAP_GROUP_MEMBER_ATTR=memberOf
 
 # Local fallback (dev/test). Prod'da KAPALI olmalı + break-glass ack.

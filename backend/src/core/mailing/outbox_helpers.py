@@ -7,7 +7,9 @@ bu modüle girmez.
 
 Public API:
 - ``enqueue_approval_request_mail(session, *, request_id, request_type,
-   recipient, viewer_base, token)``
+   recipient, viewer_base, token, action_urls)``
+  ``action_urls`` LiteLLM için ``approve``/``revise``/``reject`` HMAC
+  confirmation URL'leridir; MCP'de ``revise`` yoktur.
 - ``enqueue_litellm_down_notice(session, *, recipients, request_id,
    error_code, error_message)``
 
@@ -42,19 +44,15 @@ async def enqueue_approval_request_mail(
     request_id: uuid.UUID | str,
     request_type: str,
     recipient: str,
-    viewer_base: str = "http://localhost:3000/actions",
+    viewer_base: str = "http://localhost:8058/approvals",
     token: str = "",
     required_action: str = "approve",
     created_by: str = "anonymous",
+    action_urls: dict | None = None,
 ) -> OutboxJob:
     """Approver mail job'ını outbox'a yaz.
 
-    `request_type` (`litellm_key` | `mcp_key`); `recipient` approver list
-    başlangıç bilgisi (`Step 3` JWT üretimi için IP); `required_action`
-    mail template'inin linklediği eylem (``approve``/``revise``/``reject``).
-
-    Dedup key: ``approval_mail:<request_id>:v1`` — aynı request için birden
-    fazla kez enqueue etmekten korur.
+    Dedup key: ``approval_mail:<request_id>:<recipient>:v1``.
     """
     request_id_str = str(request_id)
     repo = OutboxRepository(session)
@@ -71,8 +69,11 @@ async def enqueue_approval_request_mail(
             "viewer_base": viewer_base,
             "token": token,
             "created_by": created_by,
+            # litellm_key: approve / revise / reject HMAC URL'leri
+            # mcp_*: yalnız approve / reject (revise üretilmez)
+            "action_urls": action_urls or {},
         }),
-        dedupe_key=f"approval_mail:{request_id_str}:v1",
+        dedupe_key=f"approval_mail:{request_id_str}:{recipient}:v1",
         status="pending",
         available_at=_utcnow(),
         attempts=0,

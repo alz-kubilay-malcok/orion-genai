@@ -8,7 +8,7 @@ from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
-from ..types import UtcDateTime, Uuid
+from ..types import ENVIRONMENT, REPO_PLATFORM, UtcDateTime, Uuid
 
 
 class ConfigMCPServer(Base):
@@ -26,14 +26,14 @@ class ConfigMCPServer(Base):
     )
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True)
-    environment: Mapped[str] = mapped_column(String(8), nullable=False)
+    environment: Mapped[str] = mapped_column(ENVIRONMENT, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     department_name: Mapped[str] = mapped_column(Text, nullable=False)
     project_name: Mapped[str] = mapped_column(Text, nullable=False)
     technical_owner_email: Mapped[str] = mapped_column(Text, nullable=False)
     purpose_text: Mapped[str] = mapped_column(Text, nullable=False)
-    repo_platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    repo_platform: Mapped[str] = mapped_column(REPO_PLATFORM, nullable=False)
     repo_url: Mapped[str] = mapped_column(Text, nullable=False)
     devops_jira_key: Mapped[Optional[str]] = mapped_column(Text)
     endpoint_url: Mapped[str] = mapped_column(Text, nullable=False)

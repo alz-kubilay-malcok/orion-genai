@@ -1,4 +1,32 @@
-ldap3>=2.9,<3
+# GenAiOrionPanel — pip-managed runtime requirements.
+# Workspace paketleri container içinde ``COPY backend/`` + ``PYTHONPATH=/app``
+# ile çözünür. Editable kurulum (``-e ...``) kullanılmıyor.
+#
+# Kurulum (host/venv):
+#   python3.12 -m venv backend/.venv
+#   source backend/.venv/bin/activate
+#   pip install -U pip wheel
+#   pip install -r backend/requirements.txt
+#
+# Kurulum (container — Dockerfile.backend bu adımı yapar):
+#   pip install -r backend/requirements.txt
+
+# ---- Run-time (PyPI) ----
+alembic>=1.13
+asyncpg>=0.29
+aiosqlite
+cryptography>=43.0
+email-validator>=2.0
+fastapi>=0.115
+httpx>=0.27
+jinja2>=3.1
+pydantic>=2.9
+pydantic-settings>=2.5
 pyjwt>=2.8
+sqlalchemy[asyncio]>=2.0
+uvicorn[standard]>=0.30
+ldap3>=2.9,<3
 bcrypt>=4.0
-pydantic-settings>=2.0
+
+# ---- Opsiyonel: yerel .env okuyucu ----
+python-dotenv>=1.0,<2.0

@@ -49,15 +49,9 @@ function LiteLLMKeyDetails({ detail }: { detail: Detail }) {
       {models.length > 0 && <Field label="Modeller" value={<ChipList items={models} />} />}
       <Field label="Yanıt süresi" value={asString(detail.response_window)} />
       <Field label="Kullanım sıklığı" value={asString(detail.usage_frequency)} />
-      <Field
-        label="Tahmini istek/gerektiği"
-        value={asNumber(detail.estimated_tokens_per_request)}
-      />
-      <Field label="Tahmini tepe RPM" value={asNumber(detail.estimated_peak_rpm)} />
-      <Field label="Tahmini tepe TPM" value={asNumber(detail.estimated_peak_tpm)} />
+      <Field label="LiteLLM team" value={asString(detail.litellm_team_id) ?? asString(detail.department_name)} />
+      <Field label="Anlık paralel istek" value={asNumber(detail.max_concurrent_requests)} />
       <Field label="Anahtar takma adı" value={asString(detail.key_alias)} />
-      <Field label="Onaylanan TPM" value={asNumber(detail.tpm_approved)} />
-      <Field label="Onaylanan RPM" value={asNumber(detail.rpm_approved)} />
     </dl>
   );
 }

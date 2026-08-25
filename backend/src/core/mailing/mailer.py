@@ -11,6 +11,15 @@ blok parser'ı (yalnız basit truthy/falsy test).
 Receiver listesi bu modülde **çözümlenmez** — dışarıdan verilir; SMTP
 sunucu/sender adresi `os.environ`'dan okunur.
 
+Allianz dahili relay (`mailenable.allianz-tr.local:25`) ile aynı desen:
+`MIMEMultipart` + HTML `MIMEText`, `COMMASPACE` / `formatdate`,
+`smtplib.SMTP(host, 25)` — auth/TLS yok. Alıcı listesi hardcoded değil;
+çağıran (approver seed / requester email) verir.
+
+`MAIL_PROVIDER=placeholder` iken SMTP'ye gitmez (yerel docker).
+Canlı gönderim: `MAIL_PROVIDER=smtp`.
+
+
 Örnek kullanım:
     send_mail(
         recipients=["admin1@allianz.com.tr", "admin2@allianz.com.tr"],
@@ -25,9 +34,13 @@ sunucu/sender adresi `os.environ`'dan okunur.
 from __future__ import annotations
 
 import html
+import json
+import logging
 import os
 import re
 import smtplib
+import uuid
+from datetime import UTC, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import COMMASPACE, formatdate
@@ -37,9 +50,53 @@ from string import Template
 _DEFAULT_SENDER = "GenAi Key Dispatcher <genai_key_dispatcher@info.com>"
 _DEFAULT_SERVER = "mailenable.allianz-tr.local"
 _DEFAULT_PORT = 25
+_DEFAULT_TIMEOUT = 15
 
 # Bu dosya backend/src/core/mailing/mailer.py; templates/ kardeş klasördür.
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _mail_sink_dir() -> Path | None:
+    raw = os.getenv("MAIL_SINK_DIR", "").strip()
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() else (_REPO_ROOT / path)
+    provider = os.getenv("MAIL_PROVIDER", "placeholder").strip().lower()
+    if provider in {"placeholder", "none", "log", "jsonfile"}:
+        return _REPO_ROOT / "test_env" / "mailbox"
+    return None
+
+
+def _write_mail_sink(
+    *,
+    recipients: list[str],
+    subject: str,
+    template_name: str | None,
+    body_html: str,
+    from_email: str,
+) -> None:
+    sink = _mail_sink_dir()
+    if sink is None:
+        return
+    sink.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    slug = (template_name or "message").replace("/", "_")
+    name = f"{stamp}_{slug}_{uuid.uuid4().hex[:8]}"
+    record = {
+        "id": name,
+        "template": template_name or "",
+        "subject": subject,
+        "from_email": from_email,
+        "recipients": list(recipients),
+        "body_html": body_html,
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "delivery_status": "skipped",
+    }
+    (sink / f"{name}.json").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+    (sink / f"{name}.html").write_text(body_html, encoding="utf-8")
 
 _PLACEHOLDER = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 # #if <ident> ... (#else ...) ... #end  — basit blok parser.
@@ -129,6 +186,13 @@ def render_template(name: str, **inputs: object) -> str:
 # ---- SMTP ---------------------------------------------------------------
 
 
+def _clean_addrs(addrs: list[str] | None) -> list[str]:
+    """Boş / whitespace adresleri at — `['']` envelope'a gitmesin."""
+    if not addrs:
+        return []
+    return [item.strip() for item in addrs if item and str(item).strip()]
+
+
 def _build_mime(
     *,
     sender: str,
@@ -148,11 +212,14 @@ def _build_mime(
     return msg
 
 
-def _resolve_smtp(sender: str | None, server: str | None, port: int | None) -> tuple[str, str, int]:
+def _resolve_smtp(
+    sender: str | None, server: str | None, port: int | None,
+) -> tuple[str, str, int, float]:
     return (
         sender or os.getenv("SMTP_SENDER", _DEFAULT_SENDER),
         server or os.getenv("SMTP_SERVER", _DEFAULT_SERVER),
         port if port is not None else int(os.getenv("SMTP_PORT", str(_DEFAULT_PORT))),
+        float(os.getenv("SMTP_TIMEOUT", str(_DEFAULT_TIMEOUT))),
     )
 
 
@@ -169,15 +236,7 @@ def send_mail(
     bcc: list[str] | None = None,
     inputs: dict[str, object] | None = None,
 ) -> bool:
-    """Tek public giriş. İki render modundan birini seç:
-
-    1. `template_name` verildiyse → `templates/<name>.html` render edilir.
-       `inputs` template'e geçirilecek placeholder + koşul değerleridir.
-    2. Verilmezse ve `message` zaten biçimlendirilmiş HTML ise ham olarak
-       gönderir (geriye uyumluluk / özel scriptler için).
-
-    Returns True başarılı.
-    """
+    """Tek public giriş. MAIL_PROVIDER=placeholder/jsonfile ise SMTP yok; mailbox'a yazar."""
     if not recipients:
         msg = "recipients listesi boş; mail gönderilmedi"
         raise ValueError(msg)
@@ -190,24 +249,42 @@ def send_mail(
             raise ValueError(msg)
         body_html = _escape(message).replace("\n", "<br>")
 
-    sender_addr, server_host, server_port = _resolve_smtp(sender, server, port)
-    cc = cc or []
-    bcc = bcc or []
+    sender_addr, server_host, server_port, timeout = _resolve_smtp(sender, server, port)
+    to_addrs = _clean_addrs(recipients)
+    cc_addrs = _clean_addrs(cc)
+    bcc_addrs = _clean_addrs(bcc)
+    if not to_addrs:
+        msg = "recipients listesi boş; mail gönderilmedi"
+        raise ValueError(msg)
+
+    _write_mail_sink(
+        recipients=to_addrs,
+        subject=subject,
+        template_name=template_name,
+        body_html=body_html,
+        from_email=sender_addr,
+    )
+
+    provider = os.getenv("MAIL_PROVIDER", "placeholder").strip().lower()
+    if provider in {"placeholder", "none", "log", "jsonfile"}:
+        logging.getLogger(__name__).info(
+            "mail placeholder: to=%s subject=%s", to_addrs, subject,
+        )
+        return True
 
     msg = _build_mime(
         sender=sender_addr,
-        recipients=recipients,
-        cc=cc,
-        bcc=bcc,
+        recipients=to_addrs,
+        cc=cc_addrs,
+        bcc=bcc_addrs,
         subject=subject,
         html_body=body_html,
     )
-    smtp = smtplib.SMTP(server_host, server_port)
+    smtp = smtplib.SMTP(server_host, server_port, timeout=timeout)
     try:
-        smtp.sendmail(sender_addr, recipients + cc + bcc, msg.as_string())
+        smtp.sendmail(sender_addr, to_addrs + cc_addrs + bcc_addrs, msg.as_string())
     finally:
         smtp.close()
-    print("Rapor Maili Gonderildi!!! \n\n")
     return True
 
 

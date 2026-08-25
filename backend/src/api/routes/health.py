@@ -47,7 +47,7 @@ async def readiness(request: Request) -> JSONResponse:
     settings = state.settings
     if settings.ldap_enabled:
         try:
-            await _preflight(
+            _preflight(
                 settings.ldap_host, settings.ldap_port, settings.ldap_connect_timeout,
             )
             checks["ldap"] = True
@@ -55,12 +55,7 @@ async def readiness(request: Request) -> JSONResponse:
             logger.warning("ldap pre-flight failed: %s", exc)
             checks["ldap"] = False
 
-    # Auth katmanları kaldırıldığı için `webhook_auth_config` kontrolü
-    # artık anlamlı değil. ``action_signing_config`` approval capability
-    # token'ını (business-token) imzalar — o doğrulamada kalmaya devam
-    # ediyor. Sır ``Settings`` tarafında taşındı (``state.config``
-    # artık DB bağlantı konfig'ini tutar).
-    checks["action_signing_config"] = bool(state.settings.action_signing_secret)
+    checks["action_signing_config"] = state.token_signer is not None
 
     all_ok = all(checks.values())
     return JSONResponse(

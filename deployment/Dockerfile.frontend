@@ -64,15 +64,14 @@ RUN addgroup -g 1001 -S nodejs \
 # build katmanındaki çıktıları kopyala. ``.next/cache`` build-time artifact;
 # üretimde irrelevant. public klasörü Next tarafından silinmiş olabilir
 # (statikler next ile birlikte), yokluğu sorun değil.
-COPY --from=build --chown=nextjs:nodejs /app/.next       ./.next
-COPY --from=build --chown=nextjs:nodejs /app/node_modules ./node_modules
-COPY --from=build --chown=nextjs:nodejs /app/package.json .  /app/
-COPY --from=build --chown=nextjs:nodejs /app/next.config.ts /app/
+COPY --from=build --chown=nextjs:nodejs /app/.next          ./.next
+COPY --from=build --chown=nextjs:nodejs /app/node_modules   ./node_modules
+COPY --from=build --chown=nextjs:nodejs /app/package.json   ./package.json
+COPY --from=build --chown=nextjs:nodejs /app/next.config.ts ./next.config.ts
 
 USER nextjs
 
 EXPOSE 3000
 
-# next start default port 3000; compose host portu-->3000 publish eder.
-# HOSTNAME=0.0.0.0 ile container dışı iface'lerden de ulaşılabilir.
-CMD ["npx", "next", "start", "-p", "3000", "-H", "0.0.0.0"]
+# Local binary — `npx` non-root home'a yazmaya çalışabilir.
+CMD ["./node_modules/.bin/next", "start", "-p", "3000", "-H", "0.0.0.0"]

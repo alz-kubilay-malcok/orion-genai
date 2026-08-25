@@ -37,14 +37,27 @@ export function ApprovalActions({ token, view }: Props) {
   // reject reason
   const [rejectReason, setRejectReason] = useState("");
 
+  const viewDetail = (view.detail ?? {}) as Record<string, unknown>;
+
   // revise fields (litellm_key only)
-  const [tpmApproved, setTpmApproved] = useState("");
-  const [rpmApproved, setRpmApproved] = useState("");
+  const [teamId, setTeamId] = useState(
+    typeof viewDetail.litellm_team_id === "string" && viewDetail.litellm_team_id
+      ? viewDetail.litellm_team_id
+      : typeof viewDetail.department_name === "string"
+        ? viewDetail.department_name
+        : "",
+  );
+  const [maxParallel, setMaxParallel] = useState(
+    typeof viewDetail.max_concurrent_requests === "number"
+      ? String(viewDetail.max_concurrent_requests)
+      : typeof viewDetail.max_concurrent_requests === "string"
+        ? viewDetail.max_concurrent_requests
+        : "1",
+  );
   const [adminNote, setAdminNote] = useState("");
 
   // Client-facing fields (litellm_key only). Backend'e sadece bilinçli
   // düzeltme yapıldığında gönderilir; aksi halde alana dokunulmaz.
-  const viewDetail = (view.detail ?? {}) as Record<string, unknown>;
   const [modelsRaw, setModelsRaw] = useState<string>(
     Array.isArray(viewDetail.models)
       ? viewDetail.models.map((m) => String(m)).join(", ")
@@ -102,10 +115,14 @@ export function ApprovalActions({ token, view }: Props) {
   }
 
   async function handleRevise() {
-    const tpm = Number(tpmApproved);
-    const rpm = Number(rpmApproved);
-    if (!Number.isFinite(tpm) || tpm <= 0 || !Number.isFinite(rpm) || rpm <= 0) {
-      setState({ phase: "error", message: "TPM ve RPM pozitif sayı olmalı" });
+    const team = teamId.trim();
+    const parallel = Number(maxParallel);
+    if (!team) {
+      setState({ phase: "error", message: "LiteLLM team adı zorunlu" });
+      return;
+    }
+    if (!Number.isFinite(parallel) || parallel < 1) {
+      setState({ phase: "error", message: "Anlık paralel istek en az 1 olmalı" });
       return;
     }
     const models = enableClientFacing
@@ -122,8 +139,8 @@ export function ApprovalActions({ token, view }: Props) {
       const result = await postRevise({
         token,
         request_version: view.request_version,
-        tpm_approved: tpm,
-        rpm_approved: rpm,
+        team_id: team,
+        max_parallel_requests: parallel,
         admin_note: adminNote || undefined,
         models,
         response_window,
@@ -204,38 +221,38 @@ export function ApprovalActions({ token, view }: Props) {
               <PencilLine className="size-5 text-amber-600" /> Talebi revize et
             </CardTitle>
             <CardDescription>
-              Limitleri daraltabilir, gerekirse talep edilen alanları da düzeltebilirsiniz.
+              Limitleri LiteLLM team ve anlık paralel istek olarak ayarlayabilirsiniz.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Operasyonel (Sadece Admin)
+                LiteLLM key limitleri
               </p>
               <p className="text-xs text-muted-foreground -mt-2">
-                Bu değerler talep edene gönderilen bildirimde yer almaz.
+                Team adı <code>/key/generate</code> body&apos;sindeki <code>team_id</code>;
+                anlık paralel istek <code>max_parallel_requests</code> (eşzamanlı tavan, 429).
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="tpm">Onaylanan TPM</Label>
+                  <Label htmlFor="team-id">LiteLLM team adı</Label>
                   <Input
-                    id="tpm"
-                    type="number"
-                    min={1}
-                    value={tpmApproved}
-                    onChange={(e) => setTpmApproved(e.target.value)}
-                    placeholder="örn. 10000"
+                    id="team-id"
+                    value={teamId}
+                    onChange={(e) => setTeamId(e.target.value)}
+                    placeholder="örn. GENAI"
+                    maxLength={128}
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="rpm">Onaylanan RPM</Label>
+                  <Label htmlFor="max-parallel">Anlık paralel istek</Label>
                   <Input
-                    id="rpm"
+                    id="max-parallel"
                     type="number"
                     min={1}
-                    value={rpmApproved}
-                    onChange={(e) => setRpmApproved(e.target.value)}
-                    placeholder="örn. 100"
+                    value={maxParallel}
+                    onChange={(e) => setMaxParallel(e.target.value)}
+                    placeholder="örn. 5"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5 sm:col-span-2">

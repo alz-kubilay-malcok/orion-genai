@@ -11,18 +11,16 @@ Davranış sözleşmesi:
 * Token-based işlemler için ``approval_actions.py`` rotası kullanılır;
   bu modülde **token yok**, yalnız admin panel POST'ları.
 * Aynı transaction sınırı: ``requests`` UPDATE + ``request_revisions``
-  INSERT (revise ise) + ``outbox_jobs`` INSERT + ``audit_log`` INSERT,
-  sonra commit.
+  INSERT (revise ise) + ``outbox_jobs`` INSERT + ``audit_events`` INSERT.
+  Commit çağıran rota yapar (mail token consume ile tek transaction).
 * Hatalar :mod:`backend.src.domain.errors` üzerinden raise edilir;
   FastAPI route'ları ``DomainError`` → HTTP ``{401,409,422}`` eşlemesi
   yapar (ayrıntı: ``routes/admin.py::_DOMAIN_ERROR_STATUS``).
 
 Notlar:
 
-* AuditLog tablosu ``request_id`` FK içermez; request-bound aksiyonlar
-  için ``target_type="request"`` + ``target_id=str(request.id)``
-  kullanılır. Bu, append-only ``audit_log``'un legacy usage'sıyla
-  hizalı.
+* Request lifecycle audit ``audit_events`` (request_id FK). LDAP mapping
+  CRUD ayrı ``audit_log`` tablosuna yazar.
 * RequestRevision tablosu ``snapshot`` TEXT — JSON-serialised string.
 """
 
@@ -38,7 +36,7 @@ from typing import Any, Mapping
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.src.data.db.models.audit_log import AuditLog
+from backend.src.data.db.models.audit_events import AuditEvent
 from backend.src.data.db.models.outbox_jobs import OutboxJob
 from backend.src.data.db.models.request_revisions import RequestRevision
 from backend.src.data.db.models.requests import Request
@@ -50,7 +48,6 @@ from backend.src.domain.enums import (
 )
 from backend.src.domain.errors import (
     ActionNotAllowedForTypeError,
-    LiteLLMEstimateMissingError,
     OptimisticLockConflictError,
     RequestNotFoundError,
 )
@@ -73,6 +70,7 @@ _DEDUPE_PREFIX_BY_JOB: dict[str, str] = {
     OutboxJobType.PROVISION_LITELLM_KEY.value: "provision:litellm",
     OutboxJobType.PROVISION_MCP_KEY.value: "provision:mcp",
     OutboxJobType.REGISTER_MCP_SERVER.value: "registry:mcp",
+    OutboxJobType.SEND_RESULT_MAIL.value: "result_mail",
 }
 
 # ---- result dataclass -------------------------------------------------
@@ -176,15 +174,17 @@ async def _record_audit(
     metadata: Mapping[str, object] | None = None,
     correlation_id: str | None = None,
 ) -> None:
-    entry = AuditLog(
+    actor_type = "mail_token" if str(actor_id).startswith("token:") else "admin_user"
+    entry = AuditEvent(
         id=uuid.uuid4(),
+        request_id=request_id,
+        event_type=event_type,
+        actor_type=actor_type,
         actor_id=actor_id,
-        actor_type="admin_user",
-        action=event_type,
-        target_type="request",
-        target_id=str(request_id),
-        payload=dict(metadata or {}),
+        request_version=request_version,
+        metadata_json=json.dumps(dict(metadata or {}), default=str),
         correlation_id=correlation_id,
+        created_at=_utcnow(),
     )
     session.add(entry)
     await session.flush()
@@ -204,7 +204,8 @@ async def admin_approve(
 ) -> _ActionResult:
     """Approve akışı (token'sız, admin panel).
 
-    * LITELLM_KEY: estimate >0 ise tpm/rpm ``approved`` = estimate.
+    * LITELLM_KEY: formdaki `max_concurrent_requests` LiteLLM
+      `max_parallel_requests` olur; team yoksa key teamsiz üretilir.
     * MCP_SERVER_REGISTRY: ``registry_allows_all_tools`` mutate.
     * Status PROVISIONING; audit + outbox atomik.
     """
@@ -219,12 +220,8 @@ async def admin_approve(
     now = _utcnow()
 
     if rtype is RequestType.LITELLM_KEY:
-        if (req.estimated_peak_tpm or 0) <= 0 or (req.estimated_peak_rpm or 0) <= 0:
-            raise LiteLLMEstimateMissingError(
-                "estimate yok/zero; approve gösterilemez, revise kullanılmalı"
-            )
-        req.tpm_approved = req.estimated_peak_tpm
-        req.rpm_approved = req.estimated_peak_rpm
+        if not (req.litellm_team_id or "").strip() and (req.department_name or "").strip():
+            req.litellm_team_id = req.department_name.strip()
     elif rtype is RequestType.MCP_SERVER_REGISTRY:
         req.registry_allows_all_tools = bool(allows_all_tools)
 
@@ -246,7 +243,6 @@ async def admin_approve(
         session, request_id=req.id, job_type_value=_JOB_BY_TYPE[req.request_type],
     )
 
-    await session.commit()
     return _ActionResult(
         request_id=req.id, new_status=RequestStatus.PROVISIONING.value,
     )
@@ -257,8 +253,8 @@ async def admin_revise(
     *,
     request_id: uuid.UUID,
     request_version: int,
-    tpm_approved: int,
-    rpm_approved: int,
+    team_id: str,
+    max_parallel_requests: int,
     admin_note: str | None,
     models: list[str] | None,
     response_window: str | None,
@@ -266,21 +262,23 @@ async def admin_revise(
     actor_id: str,
     correlation_id: str | None,
 ) -> _ActionResult:
-    """Revise (sadece litellm_key), token'sız."""
-    if tpm_approved <= 0 or rpm_approved <= 0:
-        raise ValueError("tpm_approved ve rpm_approved pozitif olmalı")
+    """Revise (sadece litellm_key): LiteLLM team + max_parallel_requests."""
+    team = (team_id or "").strip()
+    if not team:
+        raise ValueError("team_id boş olamaz")
+    if max_parallel_requests < 1:
+        raise ValueError("max_parallel_requests en az 1 olmalı")
 
-    updates: dict[str, object] = {}
+    updates: dict[str, object] = {
+        "litellm_team_id": team,
+        "max_concurrent_requests": max_parallel_requests,
+    }
     if models is not None:
         updates["models"] = tuple(models)
     if response_window is not None:
         updates["response_window"] = response_window
     if usage_frequency is not None:
         updates["usage_frequency"] = usage_frequency
-
-    unknown = set(updates) - set(LITELLM_CLIENT_FACING_FIELDS)
-    if unknown:
-        raise ValueError(f"bilinmeyen client-facing alanlar: {sorted(unknown)}")
 
     req = await _load_for_action(
         session,
@@ -292,38 +290,43 @@ async def admin_revise(
         raise ActionNotAllowedForTypeError("Revise yalnız litellm_key için geçerlidir")
 
     now = _utcnow()
-    snapshot_taken = False
+    snapshot_fields = (
+        "litellm_team_id",
+        "max_concurrent_requests",
+        *LITELLM_CLIENT_FACING_FIELDS,
+    )
+    snapshot: dict[str, object] = {}
+    for field in snapshot_fields:
+        value = getattr(req, field)
+        snapshot[field] = list(value) if isinstance(value, tuple) else value
+    revision = RequestRevision(
+        id=uuid.uuid4(),
+        request_id=req.id,
+        version=req.version,
+        snapshot=json.dumps(snapshot, ensure_ascii=False, default=str),
+        created_at=now,
+    )
+    session.add(revision)
+    for f, v in updates.items():
+        setattr(req, f, v)
 
-    if updates:
-        snapshot: dict[str, object] = {
-            f: getattr(req, f) for f in LITELLM_CLIENT_FACING_FIELDS
-        }
-        revision = RequestRevision(
-            id=uuid.uuid4(),
-            request_id=req.id,
-            version=req.version,
-            snapshot=json.dumps(snapshot, default=str),
-            created_at=now,
-        )
-        session.add(revision)
-        snapshot_taken = True
-        for f, v in updates.items():
-            setattr(req, f, v)
-
-    req.tpm_approved = tpm_approved
-    req.rpm_approved = rpm_approved
     req.status = RequestStatus.PROVISIONING.value
     req.updated_at = now
     req.version = req.version + 1
 
-    audit_meta: dict[str, object] = {}
+    audit_meta: dict[str, object] = {
+        "team_id": team,
+        "max_parallel_requests": max_parallel_requests,
+    }
     if admin_note is not None:
         audit_meta["admin_note"] = admin_note
-    if updates:
-        audit_meta["client_facing_updates"] = {
-            k: list(v) if isinstance(v, tuple) else v
-            for k, v in updates.items()
-        }
+    client_facing = {
+        k: list(v) if isinstance(v, tuple) else v
+        for k, v in updates.items()
+        if k in LITELLM_CLIENT_FACING_FIELDS
+    }
+    if client_facing:
+        audit_meta["client_facing_updates"] = client_facing
 
     await _record_audit(
         session,
@@ -341,11 +344,10 @@ async def admin_revise(
         job_type_value=_JOB_BY_TYPE[RequestType.LITELLM_KEY.value],
     )
 
-    await session.commit()
     return _ActionResult(
         request_id=req.id,
         new_status=RequestStatus.PROVISIONING.value,
-        snapshot_taken=snapshot_taken,
+        snapshot_taken=True,
     )
 
 
@@ -385,7 +387,12 @@ async def admin_reject(
         correlation_id=correlation_id,
     )
 
-    await session.commit()
+    await _enqueue_request_job(
+        session,
+        request_id=req.id,
+        job_type_value=OutboxJobType.SEND_RESULT_MAIL.value,
+    )
+
     return _ActionResult(
         request_id=req.id, new_status=RequestStatus.REJECTED.value,
     )

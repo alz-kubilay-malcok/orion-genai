@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS requests (
     tpm_approved INTEGER,
     rpm_approved INTEGER,
     key_alias TEXT,
+    litellm_team_id TEXT,
     mcp_server_slug TEXT,
     mcp_tool_names TEXT,
     all_tools INTEGER,

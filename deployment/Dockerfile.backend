@@ -27,28 +27,15 @@ RUN apt-get update \
         curl \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- Requirements: önce sadece requirements'ları kopyalarak dependency
-# cache'in invalidation'ını minimaller. ``backend/requirements.txt`` zaten
-# ``-e backend/src/...`` içeriyor; kaynak aşağıda ayrıca ``COPY`` ile gelir.
-
-COPY requirements.txt /app/requirements.txt
+# ---- Requirements: önce yalnız bu dosya kopyalanır (layer cache).
 COPY backend/requirements.txt /app/backend/requirements.txt
-
-# ---- Backend kaynağı. backend/main.py ``os.path.abspath(__file__)`` kullanır;
-# bu yüzden container içinde /app/backend altında olmalı.
-
-COPY backend/     /app/backend/
-COPY deployment/  /app/deployment/
-
-# ---- Pip install: önce backend/requirements.txt, ardından kök requirements.
-# İki aşama layout sayesinde dependency cache invalidation'ı tek dosya
-# değişiminde tetiklenir; ``pip install -r`` değişmezse üst satırlar cache'ten
-# gelir. Runtime paketleri tek başarı yolu olarak kurulur.
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip wheel \
- && pip install -r /app/backend/requirements.txt \
- && pip install -r /app/requirements.txt
+ && pip install -r /app/backend/requirements.txt
+
+COPY backend/     /app/backend/
+COPY deployment/  /app/deployment/
 
 # ---- Runtime env. ``PROCESS_ROLE`` default api; compose'da override edilir.
 
@@ -57,7 +44,7 @@ ENV PROCESS_ROLE=api \
     API_HOST=0.0.0.0 \
     API_LOG_LEVEL=info \
     DB_MODE=pg \
-    APP_ENV=dev
+    ENVIRONMENT=dev
 
 # Portlar: 8000 uvicorn (api), 8057 worker-wrapper stdout probe. Mevcut
 # uygulamanın ulaşmadığı tek port.

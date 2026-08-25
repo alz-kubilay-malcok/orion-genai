@@ -34,14 +34,27 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
   const [state, setState] = useState<SubmitState>({ phase: "idle" });
 
   const [allowsAllTools, setAllowsAllTools] = useState(false);
-  const [tpm, setTpm] = useState("");
-  const [rpm, setRpm] = useState("");
-  const [adminNote, setAdminNote] = useState("");
   const [rejectReason, setRejectReason] = useState("");
+
+  const detailRecord = (detail.detail ?? {}) as Record<string, unknown>;
+  const [teamId, setTeamId] = useState(
+    typeof detailRecord.litellm_team_id === "string" && detailRecord.litellm_team_id
+      ? detailRecord.litellm_team_id
+      : typeof detailRecord.department_name === "string"
+        ? detailRecord.department_name
+        : "",
+  );
+  const [maxParallel, setMaxParallel] = useState(
+    typeof detailRecord.max_concurrent_requests === "number"
+      ? String(detailRecord.max_concurrent_requests)
+      : typeof detailRecord.max_concurrent_requests === "string"
+        ? detailRecord.max_concurrent_requests
+        : "1",
+  );
+  const [adminNote, setAdminNote] = useState("");
 
   // Client-facing fields (litellm_key only). Existing değerleri initial state'e kopyala
   // ki admin değiştirmediğinde dokunulmamış gibi görünsün; sıfırlamak için checkbox.
-  const detailRecord = (detail.detail ?? {}) as Record<string, unknown>;
   const [modelsRaw, setModelsRaw] = useState<string>(
     Array.isArray(detailRecord.models)
       ? detailRecord.models.map((m) => String(m)).join(", ")
@@ -60,8 +73,20 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
   function reset() {
     setState({ phase: "idle" });
     setMode(null);
-    setTpm("");
-    setRpm("");
+    setTeamId(
+      typeof detailRecord.litellm_team_id === "string" && detailRecord.litellm_team_id
+        ? detailRecord.litellm_team_id
+        : typeof detailRecord.department_name === "string"
+          ? detailRecord.department_name
+          : "",
+    );
+    setMaxParallel(
+      typeof detailRecord.max_concurrent_requests === "number"
+        ? String(detailRecord.max_concurrent_requests)
+        : typeof detailRecord.max_concurrent_requests === "string"
+          ? detailRecord.max_concurrent_requests
+          : "1",
+    );
     setAdminNote("");
     setRejectReason("");
     setAllowsAllTools(false);
@@ -96,10 +121,14 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
   }
 
   async function submitRevise() {
-    const tpmNum = Number(tpm);
-    const rpmNum = Number(rpm);
-    if (!Number.isFinite(tpmNum) || tpmNum <= 0 || !Number.isFinite(rpmNum) || rpmNum <= 0) {
-      setState({ phase: "error", message: "TPM ve RPM pozitif sayı olmalı" });
+    const team = teamId.trim();
+    const parallel = Number(maxParallel);
+    if (!team) {
+      setState({ phase: "error", message: "LiteLLM team adı zorunlu" });
+      return;
+    }
+    if (!Number.isFinite(parallel) || parallel < 1) {
+      setState({ phase: "error", message: "Anlık paralel istek en az 1 olmalı" });
       return;
     }
     // Client-facing düzeltmeleri sadece admin bilinçli açtıysa gönder.
@@ -117,8 +146,8 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
     try {
       const result = await adminRevise(detail.request_id, {
         request_version: detail.request_version,
-        tpm_approved: tpmNum,
-        rpm_approved: rpmNum,
+        team_id: team,
+        max_parallel_requests: parallel,
         admin_note: adminNote || undefined,
         models,
         response_window,
@@ -229,19 +258,19 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
           <div className="flex flex-col gap-5">
             <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Operasyonel (Sadece Admin)
+                LiteLLM key limitleri
               </p>
               <p className="text-xs text-muted-foreground -mt-2">
-                Bu değerler talep edene gönderilen bildirimde yer almaz.
+                Team adı <code>team_id</code>; anlık paralel istek <code>max_parallel_requests</code>.
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="tpm">Onaylanan TPM</Label>
-                  <Input id="tpm" type="number" min={1} value={tpm} onChange={(e) => setTpm(e.target.value)} />
+                  <Label htmlFor="team-id">LiteLLM team adı</Label>
+                  <Input id="team-id" value={teamId} onChange={(e) => setTeamId(e.target.value)} maxLength={128} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="rpm">Onaylanan RPM</Label>
-                  <Input id="rpm" type="number" min={1} value={rpm} onChange={(e) => setRpm(e.target.value)} />
+                  <Label htmlFor="max-parallel">Anlık paralel istek</Label>
+                  <Input id="max-parallel" type="number" min={1} value={maxParallel} onChange={(e) => setMaxParallel(e.target.value)} />
                 </div>
                 <div className="flex flex-col gap-1.5 sm:col-span-2">
                   <Label htmlFor="admin-note">Not (opsiyonel)</Label>

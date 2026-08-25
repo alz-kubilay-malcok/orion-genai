@@ -87,10 +87,10 @@ def _latest_heartbeat_age() -> Optional[float]:
 
         from sqlalchemy import text
 
-        from backend.src.data.db import db_init
+        from backend.src.data.db import adb_init
 
         async def _read_age() -> Optional[float]:
-            built = await db_init.adb_init()
+            built = await adb_init()
             try:
                 async with built.session_factory() as session:
                     if DB_HEARTBEAT_WORKER_ID:

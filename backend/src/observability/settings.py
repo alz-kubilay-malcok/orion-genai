@@ -4,7 +4,7 @@ Tüm süreçlerde (api, worker) paylaşılan; pydantic-settings üzerinden
 .env'den okunan typed konfig katmanı. ``get_settings()`` ``@lru_cache``'li
 → test'lerde ``get_settings.cache_clear()`` gerekir.
 
-Sözleşme referansı: docs/ldap_active_directory_setup.md + ana kılavuz §3-§4.
+Sözleşme referansı: docs/ldap_active_directory_setup.md, docs/baseline.md.
 """
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     ldap_object_class: str = "person"
     ldap_group_member_attr: str = "memberOf"
     ldap_required_group: str | None = None
+    ldap_admin_group: str | None = None  # DN; member → is_superuser
     default_namespace_slug: str = "demo"
     ldap_allow_local_fallback: bool = True
     allow_prod_local_break_glass: bool = False
@@ -74,6 +75,11 @@ class Settings(BaseSettings):
     # JWT ``jwt_secret``'tan ayrı tutulur — farklı içerik + yaşam süresi).
     # ``/actions/{token}/*`` akışı bu anahtarla imzalanır/çözülür.
     action_signing_secret: str = ""
+    action_token_ttl_hours: int = Field(default=72, ge=1)
+    public_action_base_url: str = "http://localhost:8058/approvals"
+
+    # Comma-separated emails seeded into config_approvers (GENAI_APPROVAL).
+    approver_emails: str = ""
 
     # Validate hook'unda action_signing_secret kontrolü: prod'da zorunlu,
     # dev/stg'de warning.

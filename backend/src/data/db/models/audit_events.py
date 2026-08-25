@@ -8,7 +8,7 @@ from sqlalchemy import ForeignKey, Integer, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
-from ..types import UtcDateTime, Uuid
+from ..types import JsonText, UtcDateTime, Uuid
 
 
 class AuditEvent(Base):
@@ -23,7 +23,7 @@ class AuditEvent(Base):
     actor_id: Mapped[Optional[str]] = mapped_column(Text)
     request_version: Mapped[int] = mapped_column(Integer, nullable=False)
     metadata_json: Mapped[str] = mapped_column(
-        "metadata", Text, nullable=False, server_default="{}",
+        "metadata", JsonText, nullable=False, server_default="{}",
     )
     correlation_id: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[UtcDateTime] = mapped_column(
