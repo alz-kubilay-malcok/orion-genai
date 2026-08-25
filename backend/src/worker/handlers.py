@@ -331,18 +331,43 @@ async def _resolve_litellm_team_id(
     return match_team_id(parse_team_list(payload), name) or name
 
 
-def _provider_base(kind: str, environment: str | None) -> tuple[str, str, str]:
-    """Return (base_url, credential, path). Empty path → dry-run."""
+def _first_env(*names: str) -> str:
     import os
 
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _litellm_env_for_request(environment: str | None) -> str:
+    """MCP form `TEST` = LiteLLM `DEV`; STG/PROD aynı."""
     env = (environment or "DEV").upper()
+    if env == "TEST":
+        return "DEV"
+    return env
+
+
+def _provider_base(kind: str, environment: str | None) -> tuple[str, str, str]:
+    """Return (base_url, credential, path). MCP keys de aynı LiteLLM proxy."""
+    import os
+
+    litellm_env = _litellm_env_for_request(environment)
+    litellm_base = _first_env(f"LITELLM_BASE_URL_{litellm_env}", "LITELLM_BASE_URL")
+    litellm_key = _first_env(f"LITELLM_MASTER_KEY_{litellm_env}", "LITELLM_MASTER_KEY")
     if kind == "litellm":
-        base = os.getenv(f"LITELLM_BASE_URL_{env}", "") or os.getenv("LITELLM_BASE_URL", "")
-        key = os.getenv(f"LITELLM_MASTER_KEY_{env}", "") or os.getenv("LITELLM_MASTER_KEY", "")
         path = os.getenv("LITELLM_KEY_GENERATE_PATH", "/key/generate").strip() or "/key/generate"
-        return base.rstrip("/"), key, path
-    base = os.getenv(f"MCP_GATEWAY_BASE_URL_{env}", "") or os.getenv("MCP_GATEWAY_BASE_URL", "")
-    key = os.getenv(f"MCP_GATEWAY_ADMIN_CREDENTIAL_{env}", "") or os.getenv("MCP_GATEWAY_ADMIN_CREDENTIAL", "")
+        return litellm_base.rstrip("/"), litellm_key, path
+    env = (environment or "DEV").upper()
+    base = (
+        _first_env(f"MCP_GATEWAY_BASE_URL_{env}", "MCP_GATEWAY_BASE_URL")
+        or litellm_base
+    )
+    key = (
+        _first_env(f"MCP_GATEWAY_ADMIN_CREDENTIAL_{env}", "MCP_GATEWAY_ADMIN_CREDENTIAL")
+        or litellm_key
+    )
     path = os.getenv("MCP_GATEWAY_KEY_CREATE_PATH", "/mcp/keys/create").strip() or "/mcp/keys/create"
     return base.rstrip("/"), key, path
 
