@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { LogOut, LayoutDashboard, Users } from "lucide-react";
+import { LogOut, LayoutDashboard, Users, Mail } from "lucide-react";
 
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -45,12 +45,20 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
               <LayoutDashboard className="size-4" /> Bekleyen Talepler
             </Link>
             {user!.is_superuser && (
-              <Link
-                href="/admin/users"
-                className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-              >
-                <Users className="size-4" /> Kullanıcılar
-              </Link>
+              <>
+                <Link
+                  href="/admin/approvers"
+                  className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <Mail className="size-4" /> Onaylayanlar
+                </Link>
+                <Link
+                  href="/admin/users"
+                  className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <Users className="size-4" /> Kullanıcılar
+                </Link>
+              </>
             )}
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">

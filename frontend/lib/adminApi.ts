@@ -242,6 +242,56 @@ export const adminReject = (
   body: { request_version: number; reject_reason: string },
 ) => postAdminAction(`/admin/requests/${requestId}/reject`, body);
 
+// ---- Approvers (onay maili alıcıları) --------------------------------
+
+export const approverItemSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  scope: z.string(),
+  sort_order: z.number(),
+  is_active: z.boolean(),
+  created_at: z.string().nullable(),
+});
+export type ApproverItem = z.infer<typeof approverItemSchema>;
+
+export async function listApprovers(): Promise<ApproverItem[]> {
+  const res = await adminFetch("/admin/approvers");
+  if (!res.ok) throw new Error("Onaylayan listesi alınamadı");
+  return approverItemSchema.array().parse(await res.json());
+}
+
+export async function createApprover(email: string): Promise<ApproverItem> {
+  const res = await adminFetch("/admin/approvers", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+  if (res.status === 409) throw new Error("Bu e-posta zaten listede");
+  if (res.status === 422) throw new Error("Geçerli bir e-posta girin");
+  if (!res.ok) throw new Error("Onaylayan eklenemedi");
+  return approverItemSchema.parse(await res.json());
+}
+
+export async function patchApprover(
+  id: string,
+  body: { is_active?: boolean; sort_order?: number },
+): Promise<ApproverItem> {
+  const res = await adminFetch(`/admin/approvers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  if (res.status === 404) throw new Error("Kayıt bulunamadı");
+  if (!res.ok) throw new Error("Güncelleme başarısız");
+  return approverItemSchema.parse(await res.json());
+}
+
+export async function deleteApprover(id: string): Promise<void> {
+  const res = await adminFetch(`/admin/approvers/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 404) throw new Error("Kayıt bulunamadı");
+  if (!res.ok) throw new Error("Silinemedi");
+}
+
 // ---- LDAP mappings (kılavuz §5) --------------------------------------
 
 export const ldapMappingItemSchema = z.object({

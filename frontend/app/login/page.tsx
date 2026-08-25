@@ -60,8 +60,7 @@ export default function LoginPage() {
             <LogIn className="size-5" /> Admin Girişi
           </CardTitle>
           <CardDescription>
-            Active Directory hesabınızla giriş yapın. Kurum dışındaysanız
-            <code className="ml-1 font-mono text-xs">admin@local</code> break-glass hesabını kullanabilirsiniz.
+            Active Directory hesabınızla giriş yapın.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -95,11 +94,6 @@ export default function LoginPage() {
               {loading && <Loader2 className="size-4 animate-spin" />}
               Giriş yap
             </Button>
-            <p className="text-center text-xs text-muted-foreground">
-              Yerel ortamda bootstrap admin:{" "}
-              <code className="font-mono">admin@local</code> /{" "}
-              <code className="font-mono">Admin123!</code>
-            </p>
           </form>
         </CardContent>
       </Card>
