@@ -16,6 +16,28 @@ from typing import Any, Mapping
 
 TEAM_LIST_PATH = "/team/list"
 
+# Orion form / DB değeri → LiteLLM proxy `model_name`.
+# `text2test` katalog alias; proxy route `allianz-text`.
+LITELLM_MODEL_ROUTES: dict[str, str] = {
+    "text2test": "allianz-text",
+}
+
+
+def route_models_for_litellm(models: list[str] | None) -> list[str]:
+    """LiteLLM'e gidecek model listesi. Alias'ları route eder, sırayı korur, tekilleştirir."""
+    routed: list[str] = []
+    seen: set[str] = set()
+    for raw in models or []:
+        name = str(raw).strip()
+        if not name:
+            continue
+        mapped = LITELLM_MODEL_ROUTES.get(name.casefold(), name)
+        if mapped in seen:
+            continue
+        seen.add(mapped)
+        routed.append(mapped)
+    return routed
+
 
 def parse_team_list(payload: object) -> list[dict[str, Any]]:
     """`GET /team/list` hem `{teams: [...]}` hem düz liste dönebilir."""
@@ -55,7 +77,7 @@ def build_key_generate_body(
     """`POST /key/generate` JSON. TPM/RPM yok."""
     body: dict[str, object] = {
         "key_alias": key_alias,
-        "models": list(models or []),
+        "models": route_models_for_litellm(list(models or [])),
         "metadata": dict(metadata or {}),
     }
     if team_id and team_id.strip():
@@ -66,8 +88,10 @@ def build_key_generate_body(
 
 
 __all__ = [
+    "LITELLM_MODEL_ROUTES",
     "TEAM_LIST_PATH",
     "build_key_generate_body",
     "match_team_id",
     "parse_team_list",
+    "route_models_for_litellm",
 ]
