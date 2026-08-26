@@ -88,7 +88,7 @@ def main() -> None:
     st.caption("Salt okunur `requests` listesi (backend/.env Postgres).")
 
     frontend = os.getenv("PUBLIC_ACTION_BASE_URL", DEFAULT_FRONTEND_BASE_URL)
-    origin = frontend.rsplit("/approvals", 1)[0] or "http://localhost:8058"
+    origin = frontend.rsplit("/approvals", 1)[0] or "http://localhost:3000"
     st.link_button("Admin panel", f"{origin}/admin")
 
     dsn = _dsn()

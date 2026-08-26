@@ -112,7 +112,7 @@ def render_sidebar() -> tuple[str, str, bool]:
             key="orion_secret",
         )
         sign = st.checkbox("HMAC imzala", value=True, key="sign_webhook")
-        st.caption("API 8056 · Frontend 8058 · Mock 8200")
+        st.caption("Local API :8000 · Compose PANEL_PORT/api · Mock 8200")
     return api_base, secret, sign
 
 

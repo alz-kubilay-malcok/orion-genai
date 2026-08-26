@@ -45,8 +45,8 @@ from .errors import (
     TransientError,
 )
 from .config import WorkerConfig
+from backend.src.domain.enums import OutboxJobType
 from .handlers import (
-    JOB_TYPE_PROVISION_LITELLM,
     OUTBOX_HANDLERS,
     build_handlers,
 )
@@ -332,7 +332,7 @@ def _exp_backoff_seconds(attempt: int) -> int:
 # Dead-letter hook'u hangi job_type'larda approver'a mail atar?
 # Şu an sadece LiteLLM provision patlamaları (use-case: "litellm down").
 _DLQ_NOTIFICATION_JOB_TYPES: frozenset[str] = frozenset(
-    {JOB_TYPE_PROVISION_LITELLM}
+    {OutboxJobType.PROVISION_LITELLM_KEY.value}
 )
 
 

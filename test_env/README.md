@@ -1,19 +1,25 @@
 # test_env — yerel test suite
 
-API (8056) + worker + frontend (8058) ayaktayken Orion webhook, onay
-maili ve aksiyon tıklamasını buradan çalıştırırsın. Üretime alınmaz.
+Compose (`PANEL_PORT`, varsayılan 8056) veya local API (:8000) +
+`next dev` (:3000) ayaktayken Orion webhook, onay maili ve aksiyon
+tıklamasını buradan çalıştırırsın. Üretime alınmaz.
 
 ## Servisler
 
-| Servis | Adres |
-| --- | --- |
-| API | `http://127.0.0.1:8056` |
-| Frontend | `http://localhost:8058` |
-| Mock LiteLLM | `http://127.0.0.1:8200` |
-| Studio | `http://127.0.0.1:8501` |
+| Servis | Compose (nginx) | Local (nginx yok) |
+| --- | --- | --- |
+| UI + API | `http://127.0.0.1:$PANEL_PORT` | UI `:3000`, API `:8000` |
+| Webhook | `POST /api/webhooks/orion` | `POST /webhooks/orion` |
+| Mock LiteLLM | `http://127.0.0.1:8200` | aynı |
+| Studio | `http://127.0.0.1:8501` | aynı |
 
-`backend/.env`: `MAIL_PROVIDER=placeholder`, `PUBLIC_ACTION_BASE_URL=http://localhost:8058/approvals`.
+`backend/.env`: `MAIL_PROVIDER=placeholder`, local için
+`PUBLIC_ACTION_BASE_URL=http://localhost:3000/approvals`.
+Compose worker `PUBLIC_BASE_URL/approvals` kullanır.
 Worker mailleri `test_env/mailbox/` altına HTML + JSON yazar.
+
+Studio API tabanı: local `http://127.0.0.1:8000`; compose
+`http://127.0.0.1:$PANEL_PORT/api` (`ORION_STUDIO_API_BASE`).
 
 ## Çalıştırma
 
@@ -43,6 +49,7 @@ Studio bağımlılığı: `pip install -r test_env/requirements.txt`
 
 ## Webhook
 
-`POST /webhooks/orion`, HMAC-SHA256 raw body, header `x-genai-orion-panel-signature`.
+Compose: `POST /api/webhooks/orion`. Local FastAPI: `POST /webhooks/orion`.
+HMAC-SHA256 raw body, header `x-genai-orion-panel-signature`.
 Secret: `GENAI_ORION_PANEL_WEBHOOK_SECRET` (boşsa API imzayı atlar).
 Field contract: [`docs/genai-orion-panel-talep-key-contract.md`](../docs/genai-orion-panel-talep-key-contract.md).

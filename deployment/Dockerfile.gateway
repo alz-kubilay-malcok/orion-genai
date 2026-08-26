@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.7
+# Nginx reverse proxy — tek host portu. /api/* → backend-api, / → frontend.
+FROM nginx:1.27-alpine
+
+RUN apk add --no-cache curl
+
+COPY deployment/nginx/nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=8 --start-period=20s \
+    CMD curl -fsS http://127.0.0.1/api/health/live >/dev/null || exit 1

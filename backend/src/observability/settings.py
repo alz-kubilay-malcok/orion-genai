@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     # ``/actions/{token}/*`` akışı bu anahtarla imzalanır/çözülür.
     action_signing_secret: str = ""
     action_token_ttl_hours: int = Field(default=72, ge=1)
-    public_action_base_url: str = "http://localhost:8058/approvals"
+    public_action_base_url: str = "http://localhost:8056/approvals"
 
     # Comma-separated emails seeded into config_approvers (GENAI_APPROVAL).
     approver_emails: str = ""

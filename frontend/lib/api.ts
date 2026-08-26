@@ -5,9 +5,10 @@ import {
   type ActionResult,
   type ApprovalViewModel,
 } from "./actionSchema";
+import { browserApiBase, serverApiBase } from "./apiBase";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8056";
+const BROWSER_API_BASE = browserApiBase();
+const SERVER_API_BASE = serverApiBase();
 
 export type FetchApprovalResult =
   | { ok: true; data: ApprovalViewModel }
@@ -23,7 +24,7 @@ export async function fetchApprovalView(
   let res: Response;
   try {
     res = await fetch(
-      `${API_BASE_URL}/actions/${encodeURIComponent(token)}/view`,
+      `${SERVER_API_BASE}/actions/${encodeURIComponent(token)}/view`,
       { cache: "no-store" },
     );
   } catch {
@@ -82,7 +83,7 @@ async function postAction(
 ): Promise<PostActionResult> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}/actions/${path}`, {
+    res = await fetch(`${BROWSER_API_BASE}/actions/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

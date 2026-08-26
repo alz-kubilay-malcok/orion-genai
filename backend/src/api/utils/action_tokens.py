@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.src.adapters.crypto.signer import HmacTokenSigner
+from backend.src.api.utils.hmac_signer import HmacTokenSigner
 from backend.src.data.db.models.approval_tokens import ApprovalToken
 from backend.src.domain.enums import VALID_ACTIONS_BY_TYPE, ApprovalAction, RequestType
 from backend.src.domain.errors import InvalidActionTokenError

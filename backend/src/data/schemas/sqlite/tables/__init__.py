@@ -1,15 +1,8 @@
-"""SQLite DDL registry.
+"""SQLite DDL registry — DONDURULDU.
 
-PG şemasından farklı olarak:
-- UUID → CHAR(36) (client tarafı yerleştirilir)
-- JSON/JSONB → JSON-encoded TEXT (sqlite 3.38 öncesi için portable)
-- ARRAY → JSON-encoded TEXT (örn. `["a","b"]`)
-- ENUM → CHECK constraint (apps tarafında invariant)
-- application-side invariant `SecretRepository.insert_for_credential_request`
-  PG `assert_secret_request_type` trigger'ının yerini alır.
-- partial unique indexes (`WHERE is_active`) — SQLite 3.8+ destekler.
-- `read_by_user_id` FK'sız (auth strip sonrası `users` tablosu kalktı,
-  LDAP gelince tekrar bağlanacak).
+Yeni şema değişikliği ``postgresql/tables`` + ORM modellerine yazılır.
+SQLite local smoke ``Base.metadata.create_all`` ile tamamlanır; bu listedeki
+DDL kopyalarını büyütme.
 """
 
 from __future__ import annotations

@@ -6,8 +6,8 @@
 #   3) runner→ ``next start -p 3000`` non-root user ile çalıştır
 #
 # ``NEXT_PUBLIC_*`` değerleri build arg / env olarak GNB sırasında bundle
-# içine yazılır; runtime'da override edilemez. Compose'da build args
-# host portlara bağlanır.
+# içine yazılır; runtime'da override edilemez. Compose same-origin
+# ``/api`` kullanır — PANEL_PORT değişince rebuild gerekmez.
 # =============================================================================
 
 # ---- 1. deps -------------------------------------------------------------
@@ -33,11 +33,9 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8056
-ARG NEXT_PUBLIC_WEB_BASE_URL=http://localhost:8058
+ARG NEXT_PUBLIC_API_BASE_URL=/api
 
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
-    NEXT_PUBLIC_WEB_BASE_URL=${NEXT_PUBLIC_WEB_BASE_URL} \
     NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=deps /app/node_modules ./node_modules

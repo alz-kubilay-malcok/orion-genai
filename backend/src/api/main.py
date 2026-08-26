@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.src.api.routes import (
     admin,
+    admin_directory,
+    admin_ldap,
     approval_actions,
     auth,
     health,
@@ -68,7 +70,7 @@ def create_app() -> FastAPI:
             "GENAI_ORION_PANEL_CORS_ORIGINS",
             "http://localhost:3000,http://127.0.0.1:3000,"
             "http://localhost:3001,http://127.0.0.1:3001,"
-            "http://localhost:8058,http://127.0.0.1:8058",
+            "http://localhost:8056,http://127.0.0.1:8056",
         ).split(",")
         if o.strip()
     ]
@@ -85,6 +87,8 @@ def create_app() -> FastAPI:
     application.include_router(orion_webhook.router, prefix="/webhooks")
     application.include_router(auth.router)
     application.include_router(admin.router)
+    application.include_router(admin_directory.router)
+    application.include_router(admin_ldap.router)
     application.include_router(approval_actions.router, prefix="/actions")
     application.include_router(mcp_catalog.router, prefix="/catalog")
     application.include_router(internal.router, prefix="/internal")

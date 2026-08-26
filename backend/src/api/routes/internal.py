@@ -23,7 +23,7 @@ from fastapi import APIRouter, Request as FastAPIRequest
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from backend.src.data.db.models.audit_log import AuditLog
+from backend.src.data.db.models.audit_events import AuditEvent
 from backend.src.data.db.models.outbox_jobs import OutboxJob
 from backend.src.data.db.models.requests import Request
 from backend.src.domain.enums import OutboxJobType, RequestStatus, is_terminal
@@ -86,14 +86,14 @@ async def complete_chatbot_request(
 
         # Audit row.
         session.add(
-            AuditLog(
+            AuditEvent(
                 id=uuid.uuid4(),
-                actor_id=None,
+                request_id=req.id,
+                event_type="chatbot_completed",
                 actor_type="internal_service",
-                action="chatbot_completed",
-                target_type="request",
-                target_id=str(req.id),
-                payload={"request_version": req.version},
+                actor_id=None,
+                request_version=req.version,
+                metadata_json=json.dumps({"request_version": req.version}),
                 correlation_id=getattr(request.state, "correlation_id", None),
             )
         )

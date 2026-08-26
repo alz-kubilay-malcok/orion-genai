@@ -70,3 +70,5 @@ test_env/mailbox/*.html
 
 # ---- Mock LiteLLM local state ----
 test_env/mock_litellm/_data/
+
+env.prod.example

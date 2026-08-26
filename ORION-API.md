@@ -1,8 +1,8 @@
 # Orion API
 
-Base: `http://10.70.6.60:8056`
+Base: `http://<host>:<PANEL_PORT>` (nginx; varsayılan `8056`). Dışarı yalnız bu port.
 
-İki endpoint. Login gerekmez.
+İki endpoint. Login gerekmez. Path'ler `/api` prefix (nginx strip → FastAPI).
 
 Webhook imzası: ham JSON body üzerinden HMAC-SHA256, header `X-GenAi-Orion-Panel-Signature` (hex). Extra JSON alanı 422.
 
@@ -10,8 +10,8 @@ Webhook imzası: ham JSON body üzerinden HMAC-SHA256, header `X-GenAi-Orion-Pan
 
 ## Katalog
 
-`GET /catalog/mcp-servers?ortam=TEST`  
-`GET /catalog/mcp-servers?ortam=PROD`
+`GET /api/catalog/mcp-servers?ortam=TEST`  
+`GET /api/catalog/mcp-servers?ortam=PROD`
 
 `mcp_sunucusu` = `server_name`, `araclar` = `tools`.
 
@@ -28,7 +28,7 @@ Webhook imzası: ham JSON body üzerinden HMAC-SHA256, header `X-GenAi-Orion-Pan
 
 ## Talep
 
-`POST /webhooks/orion`  
+`POST /api/webhooks/orion`  
 `Content-Type: application/json`
 
 Her talepte:

@@ -26,12 +26,9 @@ from typing import Iterable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...data.db.models.outbox_jobs import OutboxJob
-from ...data.db.repository import OutboxRepository
-from ...worker.handlers import (
-    JOB_TYPE_APPROVAL_MAIL,
-    JOB_TYPE_LITELLM_DOWN_NOTICE,
-)
+from backend.src.domain.enums import OutboxJobType
+from backend.src.data.db.models.outbox_jobs import OutboxJob
+from backend.src.data.db.repository import OutboxRepository
 
 
 def _utcnow() -> datetime:
@@ -44,7 +41,7 @@ async def enqueue_approval_request_mail(
     request_id: uuid.UUID | str,
     request_type: str,
     recipient: str,
-    viewer_base: str = "http://localhost:8058/approvals",
+    viewer_base: str = "http://localhost:8056/approvals",
     token: str = "",
     required_action: str = "approve",
     created_by: str = "anonymous",
@@ -58,7 +55,7 @@ async def enqueue_approval_request_mail(
     repo = OutboxRepository(session)
     job = OutboxJob(
         id=uuid.uuid4(),
-        job_type=JOB_TYPE_APPROVAL_MAIL,
+        job_type=OutboxJobType.SEND_APPROVAL_MAIL.value,
         aggregate_id=uuid.UUID(request_id_str),
         payload=json.dumps({
             "schema_version": 1,
@@ -112,7 +109,7 @@ async def enqueue_litellm_down_notice(
     repo = OutboxRepository(session)
     job = OutboxJob(
         id=uuid.uuid4(),
-        job_type=JOB_TYPE_LITELLM_DOWN_NOTICE,
+        job_type=OutboxJobType.SEND_LITELLM_DOWN_NOTICE.value,
         aggregate_id=(
             uuid.UUID(str(request_id)) if request_id else uuid.uuid4()
         ),

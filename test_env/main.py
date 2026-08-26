@@ -362,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Boot the test_env harness.\n"
             "default = 'all' (mock LiteLLM + Streamlit panel).\n"
-            "API/worker/frontend ayri calisir (8056/8058)."
+            "API/worker/frontend ayri calisir (local :8000/:3000 veya compose PANEL_PORT)."
         ),
     )
     sub = parser.add_subparsers(dest="cmd", required=False)

@@ -9,7 +9,7 @@ Kapsam (bu tur):
 * :class:`RequestStatus` — durum yöneticisi (transitions modülü sonraki tur).
 * :class:`ApprovalAction` — mail/UI tarafındaki capability tipi.
 * :class:`OutboxJobType` — dispatcher condsumer key'leri.
-* :class:`Environment` — TEST/PROD (yerel staging).
+* :class:`Environment` — DEV/STG/TEST/PROD (MCP form yalnız TEST|PROD).
 * :data:`VALID_ACTIONS_BY_TYPE` — tip → izinli eylemler eşlemesi.
 
 Eklenecekler (sonraki tur):
@@ -81,8 +81,10 @@ class OutboxJobType(str, Enum):
 
 
 class Environment(str, Enum):
-    """Web panelinden gelen ortam bilgisi (TEST/PROD)."""
+    """Orion / LiteLLM ortamı. MCP form yalnız TEST|PROD (ADR-006)."""
 
+    DEV = "DEV"
+    STG = "STG"
     TEST = "TEST"
     PROD = "PROD"
 

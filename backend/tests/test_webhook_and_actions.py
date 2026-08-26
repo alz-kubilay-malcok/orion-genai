@@ -1,0 +1,53 @@
+import pytest
+from pydantic import ValidationError
+
+from backend.src.api.utils.schemas.webhook import LitellmKeyPayload, McpKeyPayload
+from backend.src.api.utils.webhook_mapping import resolve_request_type
+from backend.src.domain.enums import VALID_ACTIONS_BY_TYPE, ApprovalAction, RequestType
+
+
+SHARED = {
+    "talep_no": "HD-1",
+    "talep_url": "https://atlassian.example/HD-1",
+    "talep_eden_adi": "Kubilay",
+    "talep_eden_eposta": "user@allianz.com.tr",
+    "olusturulma_tarihi": "2026-08-17T11:00:00+03:00",
+}
+
+
+def test_extra_field_rejected():
+    with pytest.raises(ValidationError):
+        LitellmKeyPayload.model_validate(
+            {
+                **SHARED,
+                "talep_turu": "litellm_api_anahtari",
+                "unknown_field": "nope",
+            }
+        )
+
+
+def test_resolve_request_type():
+    assert resolve_request_type("litellm_api_anahtari") == "litellm_key"
+    assert resolve_request_type("mcp_erisim_anahtari") == "mcp_key"
+    with pytest.raises(ValueError):
+        resolve_request_type("chatbot")
+
+
+def test_mcp_payload_ok():
+    payload = McpKeyPayload.model_validate(
+        {
+            **SHARED,
+            "talep_turu": "mcp_erisim_anahtari",
+            "ortam": "PROD",
+            "mcp_sunucusu": "document-search",
+            "araclar": ["rag"],
+            "tum_araclara_erisim": False,
+        }
+    )
+    assert payload.mcp_sunucusu == "document-search"
+
+
+def test_revise_only_litellm():
+    assert ApprovalAction.REVISE in VALID_ACTIONS_BY_TYPE[RequestType.LITELLM_KEY]
+    assert ApprovalAction.REVISE not in VALID_ACTIONS_BY_TYPE[RequestType.MCP_KEY]
+    assert ApprovalAction.REVISE not in VALID_ACTIONS_BY_TYPE[RequestType.MCP_SERVER_REGISTRY]

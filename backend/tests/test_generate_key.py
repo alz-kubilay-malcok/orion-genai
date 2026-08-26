@@ -1,0 +1,47 @@
+from backend.src.core.litellm.generate_key import (
+    build_key_generate_body,
+    build_mcp_key_generate_body,
+    match_team_id,
+    parse_team_list,
+    route_models_for_litellm,
+)
+
+
+def test_route_models_alias_and_dedupe():
+    assert route_models_for_litellm(["text2test", "allianz-text", "text2test"]) == [
+        "allianz-text",
+    ]
+
+
+def test_build_key_generate_body_no_tpm_rpm():
+    body = build_key_generate_body(
+        key_alias="ALZ-GENAI-HD1-DEV-RAG",
+        models=["allianz-text"],
+        team_id="GENAI",
+        max_parallel_requests=5,
+        metadata={"ticket": "HD-1"},
+    )
+    assert body["key_alias"] == "ALZ-GENAI-HD1-DEV-RAG"
+    assert body["models"] == ["allianz-text"]
+    assert body["team_id"] == "GENAI"
+    assert body["max_parallel_requests"] == 5
+    assert "tpm_limit" not in body
+    assert "rpm_limit" not in body
+
+
+def test_build_mcp_key_scoped_tools():
+    body = build_mcp_key_generate_body(
+        key_alias="mcp-key",
+        server_slug="document-search",
+        tool_names=["rag", "search"],
+        all_tools=False,
+    )
+    perm = body["object_permission"]
+    assert perm["mcp_servers"] == ["document-search"]
+    assert perm["mcp_tool_permissions"] == {"document-search": ["rag", "search"]}
+    assert body["models"] == ["no-default-models"]
+
+
+def test_match_team_id_by_alias():
+    teams = parse_team_list({"teams": [{"team_id": "abc", "team_alias": "GENAI"}]})
+    assert match_team_id(teams, "genai") == "abc"

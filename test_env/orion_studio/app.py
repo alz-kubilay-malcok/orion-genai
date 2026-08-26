@@ -32,7 +32,7 @@ def main() -> None:
     api_base, _secret, _sign = render_sidebar()
     mock_base = os.getenv("MOCK_LITELLM_URL", DEFAULT_MOCK_URL)
     frontend = os.getenv("PUBLIC_ACTION_BASE_URL", DEFAULT_FRONTEND_BASE_URL)
-    frontend_origin = frontend.rsplit("/approvals", 1)[0] or "http://localhost:8058"
+    frontend_origin = frontend.rsplit("/approvals", 1)[0] or "http://localhost:3000"
 
     st.title("Orion Studio")
     st.caption(

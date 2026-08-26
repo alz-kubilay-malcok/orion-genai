@@ -47,10 +47,9 @@ ENV PROCESS_ROLE=api \
     DB_MODE=pg \
     ENVIRONMENT=dev
 
-# Portlar: 8000 uvicorn (api), 8057 worker-wrapper stdout probe. Mevcut
-# uygulamanın ulaşmadığı tek port.
+# Portlar: 8000 uvicorn (api). Worker probe container-içi; host publish yok.
 
-EXPOSE 8000 8057
+EXPOSE 8000
 
 # ---- Sağlık: container ayakta mı? Apiden farklı bir ``HEALTHCHECK``
 # tanımlanırsa compose öncelik alır. Buraya default bırakılmadı çünkü

@@ -2,7 +2,7 @@
 # GenAiOrionPanel — tek deployment.
 #
 #   docker compose up --build
-#     → postgres + backend-api + backend-worker + frontend
+#     → postgres + backend-api + backend-worker + frontend + gateway
 #
 # LDAP: Allianz Active Directory. Compose içinde OpenLDAP / ldap-ui yok.
 # Sırlar yalnız ``deployment/.env`` → ``env_file``. Compose ``environment:``
@@ -15,17 +15,17 @@
 # publish edilmez. LiteLLM / MCP / Redis / diğer Postgres'ler zaten
 # makinede; onları yeniden ayağa kaldırmayız, URL ile konuşuruz.
 #
-# Port haritası (host ↔ container) — PANEL_*_HOST_PORT ile override:
-#   frontend (next start)        8058 ↔ 3000
-#   backend-api (uvicorn)        8056 ↔ 8000   (host 8000 = litellm, KULLANMA)
-#   backend-worker (probe)       8057 ↔ 8057
-#   postgres                     publish YOK   (host 5432 = idp_genai_postgres)
+# Tek host portu — PANEL_PORT (varsayılan 8056):
+#   gateway (nginx)  PANEL_PORT ↔ 80
+#     /api/*  → backend-api:8000  (prefix strip)
+#     /       → frontend:3000
+#   backend-api, backend-worker, frontend, postgres: publish YOK
 #
 # prdgenai01 (2026-08-25) dolu host portları — bind etme:
 #   5432 idp postgres · 5433 raghub-db · 6379/6380/6381 redis
 #   8000 litellm · 8001-8055 yoğun (midcorp 8049/8050, mcp 8051-8055)
 #   8065 kubeflow · 8067 etl · 8077 masker · 8081 mongo-express · 8090 damage
-# Boş blok: 8056-8064. Biz 8056/8057/8058 aldık.
+# Boş blok: 8056-8064. PANEL_PORT varsayılan 8056.
 # =============================================================================
 
 name: genai-orion-panel
@@ -94,6 +94,7 @@ services:
       DB_PORT: "5432"
       PORT: "8000"
       API_HOST: 0.0.0.0
+      PUBLIC_ACTION_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8056}/approvals
     extra_hosts:
       # Host'taki litellm (:8000), mcp-gateway (:8030) vb. için.
       - "host.docker.internal:host-gateway"
@@ -107,9 +108,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    # Host 8000 litellm'de; container içi 8000, host'ta PANEL_API_HOST_PORT.
-    ports:
-      - "${PANEL_API_HOST_PORT:-8056}:8000"
+    # Host publish YOK — dışarı yalnız gateway:PANEL_PORT.
 
   # -- Backend outbox worker -------------------------------------------------
   backend-worker:
@@ -134,7 +133,8 @@ services:
       DB_HOST: postgres
       DB_PORT: "5432"
       MAIL_SINK_DIR: /app/test_env/mailbox
-      WORKER_HEALTH_HOST: 0.0.0.0
+      WORKER_HEALTH_HOST: 127.0.0.1
+      PUBLIC_ACTION_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8056}/approvals
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "/app/deployment/scripts/worker_wrapper.py"]
@@ -147,9 +147,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    # Host 8057 şu an boş. Container dinleme portu WORKER_HEALTH_PORT.
-    ports:
-      - "${PANEL_WORKER_HOST_PORT:-8057}:${WORKER_HEALTH_PORT:-8057}"
+    # Host publish YOK — probe yalnız container-içi.
 
   # -- Frontend (Next.js) ----------------------------------------------------
   frontend:
@@ -158,15 +156,15 @@ services:
       dockerfile: deployment/Dockerfile.frontend
       network: host
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8056}
-        NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-http://localhost:8058}
+        NEXT_PUBLIC_API_BASE_URL: /api
     container_name: genai-orion-panel-frontend
     restart: unless-stopped
     depends_on:
       backend-api:
         condition: service_healthy
-    ports:
-      - "${PANEL_WEB_HOST_PORT:-8058}:3000"
+    environment:
+      # SSR fetch (approval view) — Next process backend-api DNS'ini kullanır.
+      API_INTERNAL_URL: http://backend-api:8000
     healthcheck:
       # Alpine-node busybox-wget içerir; next start root/ döner 200 ancak
       # SPA history fallback'leri /about gibi path'lerde 200 döndüğü için
@@ -176,6 +174,28 @@ services:
       timeout: 5s
       retries: 8
       start_period: 30s
+    # Host publish YOK — dışarı yalnız gateway.
+
+  # -- Gateway (nginx) — tek host portu --------------------------------------
+  gateway:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.gateway
+    container_name: genai-orion-panel-gateway
+    restart: unless-stopped
+    depends_on:
+      backend-api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "${PANEL_PORT:-8056}:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/api/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 20s
 
 volumes:
   panel_pg_data:

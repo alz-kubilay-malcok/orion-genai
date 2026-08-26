@@ -1,4 +1,9 @@
-"""DDL registry — URL'den dialect tespit eder, ilgili provider listesini döndürür."""
+"""DDL registry — URL'den dialect tespit eder, ilgili provider listesini döndürür.
+
+PostgreSQL flyway listesi tek DDL kaynağıdır (compose ``DB_MODE=pg``).
+SQLite listesi dondurulmuştur: yeni tablo/kolon yalnız PG flyway + ORM
+``create_all`` safety net ile gelir; sqlite kopyasını büyütme.
+"""
 
 from __future__ import annotations
 

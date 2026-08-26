@@ -6,9 +6,9 @@ import {
   readRefreshToken,
   storeTokens,
 } from "./auth";
+import { browserApiBase } from "./apiBase";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8056";
+const API_BASE_URL = browserApiBase();
 
 const tokenResponseSchema = z.object({
   access_token: z.string(),

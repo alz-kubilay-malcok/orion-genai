@@ -3,8 +3,6 @@
 ``genai_orion_panel_core`` port'larına somut adapter bağlantıları burada yapılır.
 Route handler'ları yalnızca bu state üzerinden core'u kullanır.
 
-Core'un framework-agnostic sınırı korunur: burası composition köküdür.
-
 Approval action token imzalayan ``HmacTokenSigner`` business-token'dır;
 dış kullanıcı mail linkinden gelen capability'yi taşır. Login JWT'si
 ``Settings.jwt_secret`` → ``PyJWT`` üzerinden üretilir (ayrı modül;
@@ -18,8 +16,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from backend.src.adapters.crypto.signer import HmacTokenSigner
-from backend.src.adapters.postgres.unit_of_work import SqlAlchemyUnitOfWork
+from backend.src.api.utils.hmac_signer import HmacTokenSigner
 from backend.src.api.auth.rate_limit import LoginRateLimiter
 from backend.src.data.db.config import DBConfig
 from backend.src.data.db.engine import build_async_engine, build_session_factory
@@ -43,9 +40,6 @@ class AppState:
     def config(self) -> DBConfig:
         """Legacy rate: ``state.config`` hâlâ ``DBConfig``'i döner."""
         return self.db_config
-
-    def new_uow(self) -> SqlAlchemyUnitOfWork:
-        return SqlAlchemyUnitOfWork(self.session_factory)
 
     async def aclose(self) -> None:
         """Pool + engine temizliği."""
