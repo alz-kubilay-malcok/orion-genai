@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     ldap_use_ssl: bool = True            # LDAPS (implicit TLS)
     ldap_tls_verify: bool = True         # False → CERT_NONE (insecure, test only)
     ldap_ca_cert: str | None = None      # path to corporate CA PEM (container path)
+    ldap_ca_cert_pem: str = ""           # PEM içeriği; varsa dosyadan önce gelir
     ldap_connect_timeout: int = 5        # pre-flight TCP check, fail-fast off-network
     ldap_base_dn: str = "DC=example,DC=local"
     ldap_bind_dn: str = ""               # service account DN

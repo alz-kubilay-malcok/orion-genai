@@ -72,12 +72,28 @@ def _attr_values(entry: object, attr: str) -> list[str]:
     return [str(v) for v in raw]
 
 
+def _normalize_ca_pem(raw: str) -> str:
+    """Env'deki PEM: tırnak, `\\n`, CRLF → ldap3 `ca_certs_data`."""
+    text = raw.strip().strip('"').strip("'")
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if "\\n" in text and "-----BEGIN" in text:
+        text = text.replace("\\n", "\n")
+    return text.strip()
+
+
 def _build_server() -> Server:
     settings = get_settings()
     tls = None
     if settings.ldap_use_ssl:
         validate = ssl.CERT_REQUIRED if settings.ldap_tls_verify else ssl.CERT_NONE
-        tls = Tls(validate=validate, ca_certs_file=settings.ldap_ca_cert)
+        pem = _normalize_ca_pem(settings.ldap_ca_cert_pem or "")
+        if pem:
+            tls = Tls(validate=validate, ca_certs_data=pem)
+        else:
+            ca_file = (settings.ldap_ca_cert or "").strip() or None
+            tls = Tls(validate=validate, ca_certs_file=ca_file)
     return Server(
         settings.ldap_host,
         port=settings.ldap_port,
