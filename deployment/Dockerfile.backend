@@ -7,7 +7,7 @@
 #   - backend-worker: /app/deployment/scripts/worker_wrapper.py
 # =============================================================================
 
-FROM python:3.12-slim-bookworm AS base
+FROM python:3.12-alpine AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -17,16 +17,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# glibc wheels: asyncpg / cryptography / bcrypt. libpq runtime + derleme.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        build-essential \
+# musl: asyncpg/cryptography/bcrypt için derleyici + libpq.
+# slim (Debian) bu host'ta pull edilmiyor; alpine catalog'da var.
+RUN apk add --no-cache \
+        build-base \
+        linux-headers \
         libffi-dev \
-        libssl-dev \
-        libpq-dev \
-        libpq5 \
-        curl \
- && rm -rf /var/lib/apt/lists/*
+        openssl-dev \
+        postgresql-dev \
+        libpq \
+        curl
 
 # ---- Requirements: önce yalnız bu dosya kopyalanır (layer cache).
 COPY backend/requirements.txt /app/backend/requirements.txt
