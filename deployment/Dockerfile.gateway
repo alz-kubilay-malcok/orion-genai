@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.7
 # Nginx reverse proxy — tek host portu. /api/* → backend-api, / → frontend.
-FROM nginx:1.27-alpine
+FROM nginx:1.27-bookworm
 
-RUN apk add --no-cache curl
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY deployment/nginx/nginx.conf /etc/nginx/nginx.conf
 

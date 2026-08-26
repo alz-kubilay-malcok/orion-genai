@@ -38,7 +38,7 @@ services:
 
   # -- PostgreSQL ------------------------------------------------------------
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-bookworm
     container_name: genai-orion-panel-postgres
     restart: unless-stopped
     env_file:
@@ -166,10 +166,8 @@ services:
       # SSR fetch (approval view) — Next process backend-api DNS'ini kullanır.
       API_INTERNAL_URL: http://backend-api:8000
     healthcheck:
-      # Alpine-node busybox-wget içerir; next start root/ döner 200 ancak
-      # SPA history fallback'leri /about gibi path'lerde 200 döndüğü için
-      # kök path yeterli test.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      # slim-node wget yok; next start kök path 200.
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 8
