@@ -1,6 +1,7 @@
 """Admin panel: list/approve/revise/reject pending requests.
 
-All endpoints require a Bearer JWT of an active ``is_superuser`` user.
+Talepler (list/detail/approve/revise/reject): giriş yapmış aktif kullanıcı.
+Kullanıcı / onaylayan CRUD: ``is_superuser``.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from backend.src.adapters.postgres.models import RequestRow
-from backend.src.api.auth.dependencies import get_current_superuser
+from backend.src.api.auth.dependencies import get_current_superuser, get_current_user
 from backend.src.api.utils import admin_service
 from backend.src.data.db.models import User
 from backend.src.data.db.models.config_approvers import ConfigApprover
@@ -75,7 +76,7 @@ def _row_to_detail_dict(row: RequestRow) -> dict:
 @router.get("/requests")
 async def list_requests(
     request: Request,
-    _user: Annotated[User, Depends(get_current_superuser)],
+    _user: Annotated[User, Depends(get_current_user)],
     status: str = "",
 ) -> JSONResponse:
     state: AppState = request.app.state.container
@@ -106,7 +107,7 @@ async def list_requests(
 async def get_request_detail(
     request: Request,
     request_id: UUID,
-    _user: Annotated[User, Depends(get_current_superuser)],
+    _user: Annotated[User, Depends(get_current_user)],
 ) -> JSONResponse:
     state: AppState = request.app.state.container
     async with state.session_factory() as session:
@@ -167,7 +168,7 @@ async def approve(
     request: Request,
     request_id: UUID,
     body: AdminApproveBody,
-    user: Annotated[User, Depends(get_current_superuser)],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> JSONResponse:
     state: AppState = request.app.state.container
     try:
@@ -194,7 +195,7 @@ async def revise(
     request: Request,
     request_id: UUID,
     body: AdminReviseBody,
-    user: Annotated[User, Depends(get_current_superuser)],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> JSONResponse:
     state: AppState = request.app.state.container
     try:
@@ -232,7 +233,7 @@ async def reject(
     request: Request,
     request_id: UUID,
     body: AdminRejectBody,
-    user: Annotated[User, Depends(get_current_superuser)],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> JSONResponse:
     state: AppState = request.app.state.container
     try:
