@@ -1,0 +1,15 @@
+{
+  "talep_turu": "mcp_erisim_anahtari",
+  "talep_no": "HD-PROBE-MCP-001",
+  "talep_url": "https://atlassian.allianz/HD-PROBE-MCP-001",
+  "talep_eden_adi": "Kubilay",
+  "talep_eden_eposta": "user@allianz.com.tr",
+  "olusturulma_tarihi": "2026-08-27T10:05:00+03:00",
+  "departman_adi": "GENAI",
+  "ortam": "PROD",
+  "talep_aciklamasi": "Ajan uygulaması için MCP erişimi (probe).",
+  "kullanim_amaci": "Kurumsal dokümanlarda arama.",
+  "mcp_sunucusu": "document-search",
+  "araclar": ["rag", "search"],
+  "tum_araclara_erisim": false
+}

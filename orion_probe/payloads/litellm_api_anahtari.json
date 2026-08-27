@@ -1,0 +1,20 @@
+{
+  "talep_turu": "litellm_api_anahtari",
+  "talep_no": "HD-PROBE-LITELLM-001",
+  "talep_url": "https://atlassian.allianz/HD-PROBE-LITELLM-001",
+  "talep_eden_adi": "Kubilay",
+  "talep_eden_eposta": "user@allianz.com.tr",
+  "olusturulma_tarihi": "2026-08-27T10:00:00+03:00",
+  "departman_adi": "GENAI",
+  "ortam": "PROD",
+  "talep_aciklamasi": "LiteLLM API anahtarı talebi (probe).",
+  "kullanim_amaci": "RAG",
+  "kullanim_senaryosu": "Kurumsal dokümanlardan soru cevaplama.",
+  "modeller": ["allianz-text"],
+  "yanit_suresi": "realtime",
+  "kullanim_sikligi": "100_1000",
+  "tahmini_gunluk_istek": 400,
+  "maksimum_es_zamanli_istek": 5,
+  "ortalama_girdi_sayfasi": 3,
+  "ortalama_cikti_sayfasi": 1
+}
