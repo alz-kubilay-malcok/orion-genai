@@ -89,6 +89,22 @@ def _sign(secret: str, body: bytes) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _opener(*, use_proxy: bool) -> urllib.request.OpenerDirector:
+    ctx = ssl.create_default_context()
+    https = urllib.request.HTTPSHandler(context=ctx)
+    if use_proxy:
+        return urllib.request.build_opener(https)
+    # Windows registry + HTTP_PROXY/.allianz-tr.local'i SOCKS gateway'e yollar.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), https)
+
+
+_USE_PROXY = False
+
+
 def _request(
     method: str,
     url: str,
@@ -98,9 +114,9 @@ def _request(
     timeout: float = 30.0,
 ) -> tuple[int, str]:
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
-    ctx = ssl.create_default_context()
+    opener = _opener(use_proxy=_USE_PROXY)
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             return resp.status, resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", errors="replace")
@@ -113,6 +129,14 @@ def _print(title: str, status: int, raw: str) -> None:
         print(json.dumps(json.loads(text), ensure_ascii=False, indent=2))
     except json.JSONDecodeError:
         print(text)
+    blob = text.casefold()
+    if "socks gateway" in blob or "gateway_error" in blob or "network error" in blob:
+        print(
+            "\n[ipucu] Bu HTML paneldan değil; Windows kurumsal proxy "
+            "(.local'e çıkamıyor). Probe varsayılanı proxy=off — "
+            "güncel probe.py ile tekrar dene. Hâlâ 504 ise "
+            "https://genai-management.allianz-tr.local tarayıcıda açılıyor mu bak."
+        )
 
 
 def _load_payload(path: Path, unique: bool) -> dict[str, Any]:
@@ -165,13 +189,24 @@ def main() -> int:
         action="store_true",
         help="talep_no sonuna UTC timestamp ekle (duplicate 202'yi önler)",
     )
+    parser.add_argument(
+        "--proxy",
+        action="store_true",
+        help="sistem/HTTP proxy kullan (varsayılan: kapalı, iç ağ)",
+    )
     args = parser.parse_args()
 
-    base, secret, prefix, ortam = _cfg(_parse_env(args.env))
+    env = _parse_env(args.env)
+    base, secret, prefix, ortam = _cfg(env)
     if args.ortam:
         ortam = args.ortam
 
-    print(f"BASE_URL={base}  API_PREFIX={prefix or '(yok)'}  CATALOG_ORTAM={ortam}")
+    global _USE_PROXY
+    _USE_PROXY = args.proxy or _truthy(env.get("USE_PROXY"))
+    print(
+        f"BASE_URL={base}  API_PREFIX={prefix or '(yok)'}  "
+        f"CATALOG_ORTAM={ortam}  proxy={'on' if _USE_PROXY else 'off'}"
+    )
     rc = 0
     if args.what in {"all", "catalog"}:
         rc |= catalog(base, prefix, ortam)
