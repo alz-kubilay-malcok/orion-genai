@@ -30,6 +30,7 @@ PAYLOAD_DIR = HERE / "payloads"
 DEFAULT_ENV = HERE / ".env"
 LITELLM_JSON = PAYLOAD_DIR / "litellm_api_anahtari.json"
 MCP_JSON = PAYLOAD_DIR / "mcp_erisim_anahtari.json"
+MCP_MULTI_JSON = PAYLOAD_DIR / "mcp_erisim_anahtari_coklu.json"
 SIG_HEADER = "X-GenAi-Orion-Panel-Signature"
 
 
@@ -179,7 +180,7 @@ def main() -> int:
         "what",
         nargs="?",
         default="all",
-        choices=["all", "catalog", "litellm", "mcp"],
+        choices=["all", "catalog", "litellm", "mcp", "mcp-multi"],
         help="all = katalog + litellm + mcp key",
     )
     parser.add_argument("--env", type=Path, default=DEFAULT_ENV)
@@ -214,6 +215,8 @@ def main() -> int:
         rc |= webhook(base, prefix, secret, LITELLM_JSON, args.unique)
     if args.what in {"all", "mcp"}:
         rc |= webhook(base, prefix, secret, MCP_JSON, args.unique)
+    if args.what == "mcp-multi":
+        rc |= webhook(base, prefix, secret, MCP_MULTI_JSON, args.unique)
     return rc
 
 

@@ -1,0 +1,18 @@
+{
+  "talep_turu": "mcp_erisim_anahtari",
+  "talep_no": "HD-PROBE-MCP-MULTI-001",
+  "talep_url": "https://atlassian.allianz/HD-PROBE-MCP-MULTI-001",
+  "talep_eden_adi": "Kubilay",
+  "talep_eden_eposta": "user@allianz.com.tr",
+  "olusturulma_tarihi": "2026-08-27T10:05:00+03:00",
+  "departman_adi": "GENAI",
+  "ortam": "PROD",
+  "talep_aciklamasi": "Birden fazla MCP sunucusu (probe).",
+  "kullanim_amaci": "Doküman arama ve Jira.",
+  "mcp_sunucusu": ["document-search", "jira-mcp"],
+  "araclar": {
+    "document-search": ["rag", "search"],
+    "jira-mcp": ["create_issue"]
+  },
+  "tum_araclara_erisim": false
+}

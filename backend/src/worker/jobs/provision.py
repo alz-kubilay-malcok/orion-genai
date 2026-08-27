@@ -165,14 +165,25 @@ async def _provision_credential(
                         metadata=metadata,
                     )
                 else:
+                    from ...core.mcp_scopes import scopes_from_row
+
                     server = (getattr(row, "mcp_server_slug", None) or "").strip()
                     if not server:
                         raise PermanentError("mcp provision: mcp_server_slug boş")
+                    try:
+                        mcp_scopes = scopes_from_row(
+                            server,
+                            list(row.mcp_tool_names or []),
+                            bool(row.all_tools),
+                        )
+                    except ValueError as exc:
+                        raise PermanentError(f"mcp provision: {exc}") from exc
                     body = build_mcp_key_generate_body(
                         key_alias=alias,
                         server_slug=server,
                         tool_names=list(row.mcp_tool_names or []),
                         all_tools=bool(row.all_tools),
+                        scopes=mcp_scopes,
                         metadata=metadata,
                         team_id=resolved_team or None,
                     )

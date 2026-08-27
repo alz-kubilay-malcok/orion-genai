@@ -105,21 +105,38 @@ def mcp_key_generate_path(raw: str | None) -> str:
 def build_mcp_key_generate_body(
     *,
     key_alias: str,
-    server_slug: str,
-    tool_names: list[str] | None,
-    all_tools: bool,
+    server_slug: str = "",
+    tool_names: list[str] | None = None,
+    all_tools: bool = False,
+    scopes: list[Any] | None = None,
     metadata: Mapping[str, object] | None = None,
     team_id: str | None = None,
 ) -> dict[str, object]:
     """LiteLLM MCP scoped virtual key — `POST /key/generate`.
 
     https://docs.litellm.ai/docs/mcp_control
+    ``mcp_servers`` birden fazla sunucu alabilir; ``mcp_tool_permissions``
+    sunucu → araç listesi. Listede olup permissions'ta olmayan sunucu = tüm araçlar.
     """
-    server = server_slug.strip()
-    permission: dict[str, object] = {"mcp_servers": [server]}
-    tools = [str(name).strip() for name in (tool_names or []) if str(name).strip()]
-    if not all_tools and tools:
-        permission["mcp_tool_permissions"] = {server: tools}
+    from backend.src.core.mcp_scopes import McpScope, scopes_from_row
+
+    resolved: list[McpScope]
+    if scopes is not None:
+        resolved = list(scopes)
+    else:
+        resolved = scopes_from_row(server_slug, tool_names, all_tools)
+    servers = [scope.server for scope in resolved if scope.server]
+    if not servers:
+        server = (server_slug or "").strip()
+        servers = [server] if server else []
+    permission: dict[str, object] = {"mcp_servers": servers}
+    tool_perm: dict[str, list[str]] = {}
+    for scope in resolved:
+        if scope.all_tools or not scope.server:
+            continue
+        tool_perm[scope.server] = list(scope.tools)
+    if tool_perm:
+        permission["mcp_tool_permissions"] = tool_perm
     body: dict[str, object] = {
         "key_alias": key_alias,
         "models": list(MCP_NO_LLM_MODELS),

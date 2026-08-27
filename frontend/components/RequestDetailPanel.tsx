@@ -57,16 +57,34 @@ function LiteLLMKeyDetails({ detail }: { detail: Detail }) {
 }
 
 function McpKeyDetails({ detail }: { detail: Detail }) {
+  const slug = asString(detail.mcp_server_slug) ?? "";
+  const servers = slug.split(",").map((s) => s.trim()).filter(Boolean);
   const tools = asStringArray(detail.mcp_tool_names);
   const allTools = detail.all_tools === true;
+  const prefixed = tools.some((t) => t.includes("::"));
+  const toolChips = prefixed
+    ? tools.map((item) => {
+        const [server, name] = item.split("::");
+        return name === "*" ? `${server} (tüm araçlar)` : `${server} / ${name}`;
+      })
+    : tools;
   return (
     <dl className="divide-y divide-border">
       <Field label="Departman" value={asString(detail.department_name)} />
       <Field label="Kullanım amacı" value={asString(detail.purpose_text)} />
-      <Field label="MCP sunucusu" value={asString(detail.mcp_server_slug)} />
+      <Field
+        label={servers.length > 1 ? "MCP sunucuları" : "MCP sunucusu"}
+        value={servers.length > 1 ? <ChipList items={servers} /> : slug || undefined}
+      />
       <Field
         label="Araçlar"
-        value={allTools ? <Badge>Tüm araçlar</Badge> : tools.length > 0 ? <ChipList items={tools} /> : undefined}
+        value={
+          allTools && !prefixed ? (
+            <Badge>Tüm araçlar</Badge>
+          ) : toolChips.length > 0 ? (
+            <ChipList items={toolChips} />
+          ) : undefined
+        }
       />
       <Field label="Anahtar takma adı" value={asString(detail.key_alias)} />
     </dl>

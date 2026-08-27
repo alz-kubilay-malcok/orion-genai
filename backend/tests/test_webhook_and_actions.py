@@ -45,6 +45,64 @@ def test_mcp_payload_ok():
         }
     )
     assert payload.mcp_sunucusu == "document-search"
+    assert [s.server for s in payload.mcp_scopes()] == ["document-search"]
+
+
+def test_mcp_payload_multi_server():
+    payload = McpKeyPayload.model_validate(
+        {
+            **SHARED,
+            "talep_turu": "mcp_erisim_anahtari",
+            "ortam": "PROD",
+            "mcp_sunucusu": ["document-search", "jira-mcp"],
+            "araclar": {
+                "document-search": ["rag", "search"],
+                "jira-mcp": ["create_issue"],
+            },
+            "tum_araclara_erisim": False,
+        }
+    )
+    scopes = payload.mcp_scopes()
+    assert [s.server for s in scopes] == ["document-search", "jira-mcp"]
+    assert list(scopes[1].tools) == ["create_issue"]
+
+
+def test_mcp_payload_erisimler_mixed():
+    payload = McpKeyPayload.model_validate(
+        {
+            **SHARED,
+            "talep_turu": "mcp_erisim_anahtari",
+            "ortam": "PROD",
+            "erisimler": [
+                {
+                    "mcp_sunucusu": "document-search",
+                    "araclar": ["rag"],
+                    "tum_araclara_erisim": False,
+                },
+                {
+                    "mcp_sunucusu": "jira-mcp",
+                    "araclar": [],
+                    "tum_araclara_erisim": True,
+                },
+            ],
+        }
+    )
+    scopes = payload.mcp_scopes()
+    assert scopes[0].all_tools is False
+    assert scopes[1].all_tools is True
+
+
+def test_mcp_payload_multi_flat_tools_rejected():
+    with pytest.raises(ValidationError):
+        McpKeyPayload.model_validate(
+            {
+                **SHARED,
+                "talep_turu": "mcp_erisim_anahtari",
+                "mcp_sunucusu": ["a", "b"],
+                "araclar": ["rag"],
+                "tum_araclara_erisim": False,
+            }
+        )
 
 
 def test_revise_only_litellm():

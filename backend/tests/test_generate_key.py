@@ -42,6 +42,21 @@ def test_build_mcp_key_scoped_tools():
     assert body["models"] == ["no-default-models"]
 
 
+def test_build_mcp_key_multi_server():
+    from backend.src.core.mcp_scopes import McpScope
+
+    body = build_mcp_key_generate_body(
+        key_alias="mcp-key",
+        scopes=[
+            McpScope("document-search", ("rag",), False),
+            McpScope("jira-mcp", (), True),
+        ],
+    )
+    perm = body["object_permission"]
+    assert perm["mcp_servers"] == ["document-search", "jira-mcp"]
+    assert perm["mcp_tool_permissions"] == {"document-search": ["rag"]}
+
+
 def test_match_team_id_by_alias():
     teams = parse_team_list({"teams": [{"team_id": "abc", "team_alias": "GENAI"}]})
     assert match_team_id(teams, "genai") == "abc"

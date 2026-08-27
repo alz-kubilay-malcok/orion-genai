@@ -78,12 +78,14 @@
 | `ortam` | Erişim talep edilen ortam | Tekli seçim | Evet | `TEST`, `STG`, `PROD` |
 | `talep_aciklamasi` | Talep açıklaması | Uzun metin | Evet | Serbest metin |
 | `kullanim_amaci` | Kullanım senaryosu | Uzun metin | Evet | Serbest metin |
-| `mcp_sunucusu` | MCP sunucusu | Tekli seçim | Evet | Aktif MCP sunucu listesi |
-| `araclar` | Erişim talep edilen araçlar | Çoklu seçim | Koşullu | Seçilen MCP sunucusuna ait araçlar |
-| `tum_araclara_erisim` | Tüm araçlara erişim | Onay kutusu | Hayır | Varsayılan `false` |
+| `mcp_sunucusu` | MCP sunucusu | Tekli veya çoklu seçim | Evet | Aktif katalog `server_name`. String veya string dizisi. |
+| `araclar` | Erişim talep edilen araçlar | Çoklu seçim | Koşullu | Tek sunucu: dizi. Çoklu sunucu: `{ "server_name": ["tool", ...] }`. |
+| `tum_araclara_erisim` | Tüm araçlara erişim | Onay kutusu | Hayır | Varsayılan `false`. Çoklu sunucuda bool (hepsi) veya `{ "server_name": true }`. |
+| `erisimler` | Sunucu başına kapsam | Dizi | Hayır | Varsa `mcp_sunucusu`/`araclar` gönderme. Öğeler: `mcp_sunucusu`, `araclar`, `tum_araclara_erisim`. |
 
-- `tum_araclara_erisim=false` ise en az bir `araclar` seçimi zorunludur.
+- `tum_araclara_erisim=false` ise o sunucu için en az bir `araclar` seçimi zorunludur.
 - `tum_araclara_erisim` yalnızca ilgili MCP sunucusu izin veriyorsa gösterilir.
+- Birden fazla sunucu tek talepte desteklenir; araçlar sunucuya göre eşlenmelidir.
 
 ### MCP katalog endpoint yanıtı
 
@@ -116,6 +118,29 @@
   "kullanim_amaci": "Kurumsal dokümanlarda arama.",
   "mcp_sunucusu": "document-search-prod",
   "araclar": ["rag", "search"],
+  "tum_araclara_erisim": false
+}
+```
+
+Çoklu sunucu:
+
+```json
+{
+  "talep_turu": "mcp_erisim_anahtari",
+  "talep_no": "HD-12346",
+  "talep_url": "https://atlassian.allianz/HD-12346",
+  "talep_eden_adi": "Kubilay",
+  "talep_eden_eposta": "user@allianz.com.tr",
+  "olusturulma_tarihi": "2026-08-17T11:05:00+03:00",
+  "departman_adi": "GENAI",
+  "ortam": "PROD",
+  "talep_aciklamasi": "Ajan uygulaması için MCP erişimi.",
+  "kullanim_amaci": "Doküman arama ve Jira.",
+  "mcp_sunucusu": ["document-search-prod", "jira-mcp"],
+  "araclar": {
+    "document-search-prod": ["rag", "search"],
+    "jira-mcp": ["create_issue"]
+  },
   "tum_araclara_erisim": false
 }
 ```

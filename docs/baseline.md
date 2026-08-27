@@ -235,9 +235,9 @@ Bu tahminler requester'ın provider limitini belirlemez; policy/admin `Revise` b
 
 Kurallar:
 
-- Server tek olmalıdır ve aynı `ortam` için catalog'da active bulunmalıdır.
-- `all_tools=false` ise en az bir `araclar` değeri gerekir ve her tool active server/tool kaydıyla eşleşmelidir.
-- `all_tools=true` ise `araclar` boş/omitted olmalı ve server `allows_all_tools=true` olmalıdır.
+- Server bir veya birden fazla olabilir; her biri aynı `ortam` için catalog'da active bulunmalıdır.
+- `all_tools=false` ise o sunucu için en az bir `araclar` değeri gerekir.
+- `all_tools=true` ise o sunucunun `araclar` listesi boş olmalıdır.
 - Inbound, UI catalog seçimine güvenmez; server/tool/all-tools privilege'ını transaction öncesinde yeniden validate eder.
 
 ```json

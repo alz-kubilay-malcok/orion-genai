@@ -91,7 +91,21 @@ def litellm_revision_diff_html(
 
 
 def _scope_label(request: Mapping[str, object]) -> str:
-    if request.get("all_tools") or request.get("registry_allows_all_tools"):
+    if request.get("registry_allows_all_tools"):
+        return "Tüm araçlar"
+    from backend.src.core.mcp_scopes import scope_label, scopes_from_row
+
+    try:
+        scopes = scopes_from_row(
+            request.get("mcp_server_slug") or request.get("server_slug"),
+            request.get("mcp_tool_names"),
+            request.get("all_tools"),
+        )
+    except ValueError:
+        scopes = []
+    if scopes:
+        return scope_label(scopes)
+    if request.get("all_tools"):
         return "Tüm araçlar"
     tools = request.get("mcp_tool_names")
     if isinstance(tools, (list, tuple)) and tools:

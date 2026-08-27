@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, model_validator
+
+from backend.src.core.mcp_scopes import McpScope, normalize_scopes
 
 TALEP_TURU_MAPPING: dict[str, str] = {
     "litellm_api_anahtari": "litellm_key",
@@ -41,14 +43,51 @@ class LitellmKeyPayload(SharedFields):
     ortalama_cikti_sayfasi: float | None = None
 
 
+class McpErisim(BaseModel):
+    """Tek sunucu kapsamı — ``erisimler`` dizisi öğesi."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mcp_sunucusu: str = Field(min_length=1, max_length=200)
+    araclar: list[str] = Field(default_factory=list)
+    tum_araclara_erisim: bool = False
+
+
 class McpKeyPayload(SharedFields):
     departman_adi: str | None = None
     ortam: str | None = None
     talep_aciklamasi: str | None = None
     kullanim_amaci: str | None = None
-    mcp_sunucusu: str | None = None
-    araclar: list[str] = Field(default_factory=list)
-    tum_araclara_erisim: bool | None = None
+    mcp_sunucusu: str | list[str] | None = None
+    araclar: list[str] | dict[str, list[str]] = Field(default_factory=list)
+    tum_araclara_erisim: bool | dict[str, bool] | None = None
+    erisimler: list[McpErisim] | None = None
+
+    @model_validator(mode="after")
+    def _mcp_scopes_valid(self) -> McpKeyPayload:
+        normalize_scopes(
+            mcp_sunucusu=self.mcp_sunucusu,
+            araclar=self.araclar,
+            tum_araclara_erisim=self.tum_araclara_erisim,
+            erisimler=(
+                [row.model_dump() for row in self.erisimler]
+                if self.erisimler is not None
+                else None
+            ),
+        )
+        return self
+
+    def mcp_scopes(self) -> list[McpScope]:
+        return normalize_scopes(
+            mcp_sunucusu=self.mcp_sunucusu,
+            araclar=self.araclar,
+            tum_araclara_erisim=self.tum_araclara_erisim,
+            erisimler=(
+                [row.model_dump() for row in self.erisimler]
+                if self.erisimler is not None
+                else None
+            ),
+        )
 
 
 class McpRegistryPayload(SharedFields):
@@ -78,6 +117,7 @@ SCHEMA_BY_TALEP_TURU: dict[str, type[SharedFields]] = {
 
 __all__ = [
     "LitellmKeyPayload",
+    "McpErisim",
     "McpKeyPayload",
     "McpRegistryPayload",
     "SCHEMA_BY_TALEP_TURU",

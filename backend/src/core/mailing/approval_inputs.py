@@ -107,6 +107,21 @@ def mcp_approval_inputs(
     action_token_ttl_hours: object = 72,
 ) -> dict[str, object]:
     """MCP onay maili — approve/reject only; revise token yok."""
+    from backend.src.core.mcp_scopes import scope_label, scopes_from_row
+
+    import html
+
+    scopes: list = []
+    try:
+        scopes = scopes_from_row(
+            request.get("mcp_server_slug") or request.get("server_slug"),
+            request.get("mcp_tool_names"),
+            request.get("all_tools"),
+        )
+        tools_label = scope_label(scopes) if scopes else _s(request.get("tools_rows"))
+    except ValueError:
+        tools_label = _s(request.get("tools_rows"))
+    all_tools = bool(scopes) and all(scope.all_tools for scope in scopes)
     return {
         "approver_name": recipient.split("@")[0],
         "ticket_id": _s(request.get("genai_orion_panel_ticket_id")),
@@ -120,13 +135,16 @@ def mcp_approval_inputs(
         ),
         "server_slug": _s(request.get("mcp_server_slug") or request.get("server_slug")),
         "key_alias": _s(request.get("key_alias")),
-        "all_tools_label": _s(request.get("all_tools_label")),
+        "all_tools_label": _s(
+            request.get("all_tools_label")
+            or ("Evet" if all_tools else "Hayır")
+        ),
         "created_at": request.get("created_at") or "",
         "approve_link": approve_link,
         "reject_link": reject_link,
         "request_version": request.get("version") or 0,
         "action_token_ttl_hours": action_token_ttl_hours,
-        "tools_rows": request.get("tools_rows") or "",
+        "tools_rows": html.escape(tools_label),
         "_unescaped": {"tools_rows"},
     }
 

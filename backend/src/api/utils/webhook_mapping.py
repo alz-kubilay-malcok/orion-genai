@@ -82,7 +82,15 @@ def payload_to_request_fields(
         snakecase = _TURKISH_TO_SNAKE.get(k, k)
         if snakecase in _RESERVED_ORM:
             continue
+        if request_type == "mcp_key" and k in {
+            "mcp_sunucusu", "araclar", "tum_araclara_erisim", "erisimler",
+        }:
+            continue
         fields[snakecase] = v
+    if request_type == "mcp_key":
+        from backend.src.core.mcp_scopes import persist_fields
+
+        fields.update(persist_fields(payload.mcp_scopes()))  # type: ignore[attr-defined]
     if request_type == "litellm_key":
         purpose = payload.model_dump().get("kullanim_amaci")
         if purpose:
