@@ -30,6 +30,17 @@
 
 name: genai-orion-panel
 
+# prdgenai: host'ta http_proxy var, Docker Hub pull daemon proxy ile çalışır.
+# Build RUN (pip/npm/apt) konteyner içi — ARG ile geçmezse internet timeout.
+# Shell'deki http_proxy/https_proxy/no_proxy otomatik interpolasyon.
+x-build-proxy: &build-proxy
+  http_proxy: ${http_proxy:-}
+  https_proxy: ${https_proxy:-}
+  no_proxy: ${no_proxy:-}
+  HTTP_PROXY: ${HTTP_PROXY:-${http_proxy:-}}
+  HTTPS_PROXY: ${HTTPS_PROXY:-${https_proxy:-}}
+  NO_PROXY: ${NO_PROXY:-${no_proxy:-}}
+
 services:
 
   # ---------------------------------------------------------------------------
@@ -78,6 +89,8 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       network: host
+      args:
+        <<: *build-proxy
     container_name: genai-orion-panel-api
     restart: unless-stopped
     depends_on:
@@ -95,6 +108,12 @@ services:
       PORT: "8000"
       API_HOST: 0.0.0.0
       PUBLIC_ACTION_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8056}/approvals
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      HTTP_PROXY: ${HTTP_PROXY:-${http_proxy:-}}
+      HTTPS_PROXY: ${HTTPS_PROXY:-${https_proxy:-}}
+      no_proxy: ${no_proxy:-localhost,127.0.0.1},postgres,backend-api,backend-worker,frontend,gateway,host.docker.internal
+      NO_PROXY: ${NO_PROXY:-${no_proxy:-localhost,127.0.0.1}},postgres,backend-api,backend-worker,frontend,gateway,host.docker.internal
     extra_hosts:
       # Host'taki litellm (:8000), mcp-gateway (:8030) vb. için.
       - "host.docker.internal:host-gateway"
@@ -116,6 +135,8 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile.backend
       network: host
+      args:
+        <<: *build-proxy
     container_name: genai-orion-panel-worker
     restart: unless-stopped
     # NOT: backend-api'ye değil postgres'e bağımlı — worker outbox DB'si
@@ -135,6 +156,12 @@ services:
       MAIL_SINK_DIR: /app/test_env/mailbox
       WORKER_HEALTH_HOST: 127.0.0.1
       PUBLIC_ACTION_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8056}/approvals
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      HTTP_PROXY: ${HTTP_PROXY:-${http_proxy:-}}
+      HTTPS_PROXY: ${HTTPS_PROXY:-${https_proxy:-}}
+      no_proxy: ${no_proxy:-localhost,127.0.0.1},postgres,backend-api,backend-worker,frontend,gateway,host.docker.internal
+      NO_PROXY: ${NO_PROXY:-${no_proxy:-localhost,127.0.0.1}},postgres,backend-api,backend-worker,frontend,gateway,host.docker.internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "/app/deployment/scripts/worker_wrapper.py"]
@@ -157,6 +184,7 @@ services:
       network: host
       args:
         NEXT_PUBLIC_API_BASE_URL: /api
+        <<: *build-proxy
     container_name: genai-orion-panel-frontend
     restart: unless-stopped
     depends_on:
@@ -166,10 +194,8 @@ services:
       # SSR fetch (approval view) — Next process backend-api DNS'ini kullanır.
       API_INTERNAL_URL: http://backend-api:8000
     healthcheck:
-      # Alpine-node busybox-wget içerir; next start root/ döner 200 ancak
-      # SPA history fallback'leri /about gibi path'lerde 200 döndüğü için
-      # kök path yeterli test.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      # slim-node wget yok; next start kök path 200.
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 8
@@ -191,7 +217,12 @@ services:
     ports:
       - "${PANEL_PORT:-8056}:80"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/api/health/live"]
+      # nginx imajında curl yok (apt ayna kapalı). bash /dev/tcp + HTTP 200.
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/80 && printf \"GET /api/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200\" <&3'",
+        ]
       interval: 10s
       timeout: 3s
       retries: 8

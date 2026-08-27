@@ -1,39 +1,32 @@
 # syntax=docker/dockerfile:1.7
-# =============================================================================
-# Frontend (Next.js 15 App Router) — multi-stage build.
-#   1) deps  → ayrı katman: package.json + lockfile ile ``npm install``
-#   2) build → source kopyala + next build
-#   3) runner→ ``next start -p 3000`` non-root user ile çalıştır
-#
-# ``NEXT_PUBLIC_*`` değerleri build arg / env olarak GNB sırasında bundle
-# içine yazılır; runtime'da override edilemez. Compose same-origin
-# ``/api`` kullanır — PANEL_PORT değişince rebuild gerekmez.
-# =============================================================================
+# Frontend — Debian slim, apt YOK. npm için proxy ARG (compose shell).
+FROM node:20-bookworm-slim AS deps
 
-# ---- 1. deps -------------------------------------------------------------
-FROM node:20-alpine AS deps
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 WORKDIR /app
 
-# Lockfile varsa ``npm ci`` ile deterministic; yoksa ``npm install``.
-# Alpine'da libc uyumsuz paketlerini ``--ignore-scripts`` ile atla — node-
-# gyp build'leri glacier tarafı ekstra yük getirir; sonradan tekrar yok.
 COPY frontend/package.json       /app/package.json
 COPY frontend/package-lock.json  /app/package-lock.json
 
-RUN if [ -f /app/package-lock.json ]; then \
-      npm ci --no-audit --no-fund --prefer-offline; \
-    else \
-      echo "package-lock.json yok; npm install kullanılıyor" && \
-      npm install --no-audit --no-fund --prefer-offline; \
-    fi
+RUN npm ci --no-audit --no-fund --prefer-offline
 
-# ---- 2. build ------------------------------------------------------------
-FROM node:20-alpine AS build
+FROM node:20-bookworm-slim AS build
+
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG NEXT_PUBLIC_API_BASE_URL=/api
 
 WORKDIR /app
-
-ARG NEXT_PUBLIC_API_BASE_URL=/api
 
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
     NEXT_TELEMETRY_DISABLED=1
@@ -41,11 +34,9 @@ ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ ./
 
-# ``next.config.ts`` next 15 ile CI'da bunu destekler.
 RUN npm run build
 
-# ---- 3. runner -----------------------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 
 WORKDIR /app
 
@@ -54,14 +45,9 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
-# next start default 3000, container içinde sabit 3000; host portu compose'da.
-# Alpine'da user için shadow-utils zorunlu değil; adduser/addgroup built'in.
-RUN addgroup -g 1001 -S nodejs \
- && adduser -S nextjs -u 1001
+RUN groupadd --system --gid 1001 nodejs \
+ && useradd --system --uid 1001 --gid nodejs nextjs
 
-# build katmanındaki çıktıları kopyala. ``.next/cache`` build-time artifact;
-# üretimde irrelevant. public klasörü Next tarafından silinmiş olabilir
-# (statikler next ile birlikte), yokluğu sorun değil.
 COPY --from=build --chown=nextjs:nodejs /app/.next          ./.next
 COPY --from=build --chown=nextjs:nodejs /app/node_modules   ./node_modules
 COPY --from=build --chown=nextjs:nodejs /app/package.json   ./package.json
@@ -71,5 +57,4 @@ USER nextjs
 
 EXPOSE 3000
 
-# Local binary — `npx` non-root home'a yazmaya çalışabilir.
 CMD ["./node_modules/.bin/next", "start", "-p", "3000", "-H", "0.0.0.0"]
