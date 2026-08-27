@@ -74,6 +74,10 @@ export function isTerminalStatus(status: RequestStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
+export function isSettledStatus(status: RequestStatus): boolean {
+  return isTerminalStatus(status) || status === "provisioning";
+}
+
 export function isOpenStatus(status: RequestStatus): boolean {
   return OPEN_STATUSES.has(status);
 }

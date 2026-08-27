@@ -199,6 +199,10 @@ export const adminRequestDetailSchema = z.object({
   created_at: z.string(),
   detail: z.record(z.string(), z.unknown()),
   available_actions: z.array(z.enum(["approve", "revise", "reject"])),
+  litellm_teams: z
+    .array(z.object({ team_id: z.string(), team_alias: z.string() }))
+    .optional()
+    .default([]),
 });
 export type AdminRequestDetail = z.infer<typeof adminRequestDetailSchema>;
 

@@ -2,6 +2,7 @@ import { fetchApprovalView } from "@/lib/api";
 import { ApprovalView } from "@/components/ApprovalView";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { ResultBanner } from "@/components/ResultBanner";
+import { isSettledStatus } from "@/lib/requestStatus";
 
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_ACTION_TOKEN: "Bağlantının süresi dolmuş veya geçersiz.",
@@ -9,7 +10,21 @@ const ERROR_MESSAGES: Record<string, string> = {
   UNKNOWN_ERROR: "Beklenmeyen bir hata oluştu.",
 };
 
-const TERMINAL_STATUSES = new Set(["completed", "rejected", "failed", "expired"]);
+function settledCopy(status: string): { title: string; message: string } {
+  if (status === "rejected") {
+    return { title: "Bu talep reddedildi", message: "Talep edene red gerekçesi iletildi." };
+  }
+  if (status === "failed") {
+    return { title: "Bu talep başarısız", message: "Sağlama tamamlanamadı." };
+  }
+  if (status === "completed") {
+    return { title: "Bu talep tamamlandı", message: "Anahtar talep edene iletildi." };
+  }
+  return {
+    title: "Talep onaylandı",
+    message: "İşlem alındı. Anahtar hazır olunca talep edene mail gider.",
+  };
+}
 
 export default async function ApprovalPage({
   params,
@@ -24,11 +39,10 @@ export default async function ApprovalPage({
       {result.ok ? (
         <>
           <ApprovalView view={result.data} />
-          {TERMINAL_STATUSES.has(result.data.status) ? (
+          {isSettledStatus(result.data.status) ? (
             <ResultBanner
-              tone="info"
-              title="Bu talep zaten sonuçlandırılmış"
-              message={`Mevcut durum: ${result.data.status}`}
+              tone={result.data.status === "rejected" || result.data.status === "failed" ? "error" : "info"}
+              {...settledCopy(result.data.status)}
             />
           ) : (
             <ApprovalActions token={token} view={result.data} />

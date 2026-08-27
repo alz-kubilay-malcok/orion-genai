@@ -51,6 +51,51 @@ def parse_team_list(payload: object) -> list[dict[str, Any]]:
     return []
 
 
+def teams_for_ui(rows: list[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """Dropdown: ``[{team_id, team_alias}]``, boş/tekrar yok."""
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        team_id = str(row.get("team_id") or "").strip()
+        alias = str(
+            row.get("team_alias") or row.get("team_name") or team_id
+        ).strip()
+        key = (team_id or alias).casefold()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append({"team_id": team_id or alias, "team_alias": alias or team_id})
+    out.sort(key=lambda item: item["team_alias"].casefold())
+    return out
+
+
+async def fetch_litellm_teams(ortam: str | None) -> list[dict[str, str]]:
+    """LiteLLM ``GET /team/list`` — UI dropdown. Hata/timeout → boş liste."""
+    import httpx
+
+    from backend.src.core.litellm.target import resolve_litellm_http
+
+    base, credential = resolve_litellm_http(ortam, kind="litellm")
+    if not base or not credential:
+        return []
+    url = f"{base.rstrip('/')}{TEAM_LIST_PATH}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+            response = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {credential}"},
+            )
+    except (httpx.ConnectError, httpx.TimeoutException, OSError):
+        return []
+    if response.status_code >= 400:
+        return []
+    try:
+        payload = response.json()
+    except ValueError:
+        return []
+    return teams_for_ui(parse_team_list(payload))
+
+
 def match_team_id(teams: list[Mapping[str, Any]], name: str) -> str | None:
     """`team_alias` veya `team_id` (casefold) → LiteLLM `team_id`."""
     needle = name.strip().casefold()
@@ -154,8 +199,10 @@ __all__ = [
     "TEAM_LIST_PATH",
     "build_key_generate_body",
     "build_mcp_key_generate_body",
+    "fetch_litellm_teams",
     "match_team_id",
     "mcp_key_generate_path",
     "parse_team_list",
     "route_models_for_litellm",
+    "teams_for_ui",
 ]

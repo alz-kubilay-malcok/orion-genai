@@ -122,6 +122,11 @@ async def get_request_detail(
         a.value for a in VALID_ACTIONS_BY_TYPE.get(rtype, frozenset())
     )
     created_at = req.genai_orion_panel_created_at or req.created_at
+    litellm_teams: list[dict[str, str]] = []
+    if req.request_type == "litellm_key":
+        from backend.src.core.litellm.generate_key import fetch_litellm_teams
+
+        litellm_teams = await fetch_litellm_teams(req.environment)
     return JSONResponse(
         content={
             "request_id": str(req.id),
@@ -136,6 +141,7 @@ async def get_request_detail(
             "created_at": created_at.isoformat() if created_at else None,
             "detail": detail,
             "available_actions": available_actions,
+            "litellm_teams": litellm_teams,
         }
     )
 

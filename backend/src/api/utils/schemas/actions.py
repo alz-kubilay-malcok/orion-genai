@@ -72,3 +72,4 @@ class ApprovalViewModel(BaseModel):
     environment: str
     created_at: datetime
     detail: dict[str, Any]
+    litellm_teams: list[dict[str, str]] = Field(default_factory=list)

@@ -1,6 +1,7 @@
 import { ExternalLink } from "lucide-react";
 
 import type { ApprovalViewModel } from "@/lib/actionSchema";
+import { RequestDetailPanel } from "@/components/RequestDetailPanel";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -10,7 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { RequestDetailPanel } from "@/components/RequestDetailPanel";
+import { statusLabel } from "@/lib/requestStatus";
 
 const ACTION_LABELS: Record<ApprovalViewModel["action"], string> = {
   approve: "Onay",
@@ -33,6 +34,11 @@ const ACTION_BADGE_VARIANT: Record<
   reject: "destructive",
 };
 
+function approvalStatusLabel(status: string) {
+  if (status === "provisioning") return "Onaylandı";
+  return statusLabel(status);
+}
+
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1 py-2.5 sm:flex-row sm:items-baseline sm:justify-between">
@@ -50,7 +56,7 @@ export function ApprovalView({ view }: { view: ApprovalViewModel }) {
           <Badge variant={ACTION_BADGE_VARIANT[view.action]}>
             {ACTION_LABELS[view.action]} bekleniyor
           </Badge>
-          <Badge variant="outline">{view.status}</Badge>
+          <Badge variant="outline">{approvalStatusLabel(view.status)}</Badge>
         </div>
         <CardTitle>
           {REQUEST_TYPE_LABELS[view.request_type]} — {view.genai_orion_panel_ticket_id}
@@ -61,7 +67,7 @@ export function ApprovalView({ view }: { view: ApprovalViewModel }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
         <dl className="divide-y divide-border">
-          <DetailRow label="Durum" value={view.status} />
+          <DetailRow label="Durum" value={approvalStatusLabel(view.status)} />
           <DetailRow label="Versiyon" value={view.request_version} />
           <DetailRow
             label="Talep eden"

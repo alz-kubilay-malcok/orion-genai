@@ -17,6 +17,10 @@ export const approvalViewSchema = z.object({
   environment: z.string(),
   created_at: z.string(),
   detail: z.record(z.string(), z.unknown()),
+  litellm_teams: z
+    .array(z.object({ team_id: z.string(), team_alias: z.string() }))
+    .optional()
+    .default([]),
 });
 
 export type ApprovalViewModel = z.infer<typeof approvalViewSchema>;

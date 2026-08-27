@@ -114,6 +114,12 @@ async def get_action_view(
     if req is None:
         raise RequestNotFoundError("talep bulunamadı")
 
+    litellm_teams: list[dict[str, str]] = []
+    if req.request_type == "litellm_key" and action.value == "revise":
+        from backend.src.core.litellm.generate_key import fetch_litellm_teams
+
+        litellm_teams = await fetch_litellm_teams(req.environment)
+
     return ApprovalViewModel(
         action=action.value,
         request_id=str(req.id),
@@ -127,6 +133,7 @@ async def get_action_view(
         environment=req.environment or "",
         created_at=req.genai_orion_panel_created_at,
         detail=_row_to_detail_dict(req),
+        litellm_teams=litellm_teams,
     )
 
 

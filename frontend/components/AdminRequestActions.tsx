@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ResultBanner } from "@/components/ResultBanner";
+import { LiteLLMTeamSelect } from "@/components/LiteLLMTeamSelect";
 
 type Props = {
   detail: AdminRequestDetail;
@@ -70,32 +71,6 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
 
   const submitting = state.phase === "submitting";
 
-  function reset() {
-    setState({ phase: "idle" });
-    setMode(null);
-    setTeamId(
-      typeof detailRecord.litellm_team_id === "string" && detailRecord.litellm_team_id
-        ? detailRecord.litellm_team_id
-        : typeof detailRecord.department_name === "string"
-          ? detailRecord.department_name
-          : "",
-    );
-    setMaxParallel(
-      typeof detailRecord.max_concurrent_requests === "number"
-        ? String(detailRecord.max_concurrent_requests)
-        : typeof detailRecord.max_concurrent_requests === "string"
-          ? detailRecord.max_concurrent_requests
-          : "1",
-    );
-    setAdminNote("");
-    setRejectReason("");
-    setAllowsAllTools(false);
-    setModelsRaw("");
-    setResponseWindow("");
-    setUsageFrequency("");
-    setEnableClientFacing(false);
-  }
-
   function switchMode(next: Mode) {
     // Mod değişirken önceki submit state'i temizle ki spinner sıkışmasın.
     setState({ phase: "idle" });
@@ -124,7 +99,7 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
     const team = teamId.trim();
     const parallel = Number(maxParallel);
     if (!team) {
-      setState({ phase: "error", message: "LiteLLM team adı zorunlu" });
+      setState({ phase: "error", message: "LiteLLM team seçin" });
       return;
     }
     if (!Number.isFinite(parallel) || parallel < 1) {
@@ -191,11 +166,10 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
   // durumlarda form yerine sadece TerminalSummary satirinin durmasi yeterli.
   const hasActions =
     detail.status === "waiting_approval" && detail.available_actions.length > 0;
-  if (!hasActions) {
+  if (!hasActions || state.phase === "success") {
     return null;
   }
 
-  // Tek başarı/hata göstergesi yukarıda (submit phase'ine göre render edilir).
   // Aktif mod seçili değilse sadece Onayla/Revize/Reddet düğmeleri; mod seçiliyse form + submit butonu.
   return (
     <Card>
@@ -203,13 +177,7 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
         <CardTitle className="text-base">İşlem</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {state.phase === "success" ? (
-          <ResultBanner
-            tone="info"
-            title="İşlem tamamlandı"
-            message={`Yeni durum: ${state.status}`}
-          />
-        ) : state.phase === "error" ? (
+        {state.phase === "error" ? (
           <ResultBanner tone="error" title="İşlem başarısız" message={state.message} />
         ) : null}
 
@@ -261,12 +229,18 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
                 LiteLLM key limitleri
               </p>
               <p className="text-xs text-muted-foreground -mt-2">
-                Team adı <code>team_id</code>; anlık paralel istek <code>max_parallel_requests</code>.
+                Team LiteLLM listesinden seçilir; anlık paralel istek <code>max_parallel_requests</code>.
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="team-id">LiteLLM team adı</Label>
-                  <Input id="team-id" value={teamId} onChange={(e) => setTeamId(e.target.value)} maxLength={128} />
+                  <Label htmlFor="team-id">LiteLLM team</Label>
+                  <LiteLLMTeamSelect
+                    id="team-id"
+                    teams={detail.litellm_teams ?? []}
+                    value={teamId}
+                    onChange={setTeamId}
+                    disabled={submitting}
+                  />
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="max-parallel">Anlık paralel istek</Label>
@@ -361,11 +335,6 @@ export function AdminRequestActions({ detail, onActionComplete }: Props) {
             {submitting && <Loader2 className="size-4 animate-spin" />}
             {mode === "approve" ? "Onayla" : mode === "revise" ? "Revize gönder" : "Reddet"}
           </Button>
-          {state.phase === "success" && (
-            <Button variant="outline" onClick={reset}>
-              Kapat
-            </Button>
-          )}
         </CardFooter>
       )}
     </Card>

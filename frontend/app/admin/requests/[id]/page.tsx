@@ -13,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
-  isTerminalStatus,
+  isSettledStatus,
   statusBadgeVariant,
   statusLabel,
 } from "@/lib/requestStatus";
@@ -55,7 +55,9 @@ function DetailContent({ requestId }: { requestId: string }) {
       <Card>
         <CardHeader className="gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant={statusBadgeVariant(detail.status)}>{statusLabel(detail.status)}</Badge>
+            <Badge variant={statusBadgeVariant(detail.status)}>
+              {detail.status === "provisioning" ? "Onaylandı" : statusLabel(detail.status)}
+            </Badge>
             <Badge variant="outline">{detail.environment}</Badge>
           </div>
           <CardTitle>
@@ -80,7 +82,7 @@ function DetailContent({ requestId }: { requestId: string }) {
         </CardContent>
       </Card>
 
-      {isTerminalStatus(detail.status) ? (
+      {isSettledStatus(detail.status) ? (
         <TerminalSummary detail={detail} />
       ) : (
         <AdminRequestActions
@@ -105,6 +107,7 @@ function TerminalSummary({ detail }: { detail: AdminRequestDetail }) {
   const isRejected = detail.status === "rejected";
   const isFailed = detail.status === "failed";
   const isCompleted = detail.status === "completed";
+  const isApprovedPending = detail.status === "provisioning";
   const tone: "error" | "info" = isFailed || isRejected ? "error" : "info";
   const title = isRejected
     ? "Bu talep reddedildi"
@@ -112,13 +115,18 @@ function TerminalSummary({ detail }: { detail: AdminRequestDetail }) {
       ? "Bu talep başarısız"
       : isCompleted
         ? "Bu talep tamamlandı"
-        : "Bu talep sonuçlandırılmış";
+        : isApprovedPending
+          ? "Talep onaylandı"
+          : "Bu talep sonuçlandırılmış";
+  const message = isApprovedPending
+    ? "İşlem alındı. Anahtar hazır olunca talep edene mail gider."
+    : `Durum: ${statusLabel(detail.status)}`;
   return (
     <>
       <ResultBanner
         tone={tone}
         title={title}
-        message={`Durum: ${statusLabel(detail.status)}`}
+        message={message}
       />
       {(rejectReason || assigneeEmail || completedAt || errorMessage) && (
         <Card>

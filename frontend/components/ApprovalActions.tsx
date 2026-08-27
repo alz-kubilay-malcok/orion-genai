@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ResultBanner } from "@/components/ResultBanner";
+import { LiteLLMTeamSelect } from "@/components/LiteLLMTeamSelect";
 
 type Props = {
   token: string;
@@ -75,23 +76,17 @@ export function ApprovalActions({ token, view }: Props) {
   const [allowsAllTools, setAllowsAllTools] = useState(false);
 
   if (state.phase === "success") {
-    return (
-      <div className="flex flex-col gap-3">
-        <ResultBanner
-          tone="info"
-          title="İşlem tamamlandı"
-          message={`Yeni durum: ${state.status}`}
-        />
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            onClick={() => setState({ phase: "idle" })}
-          >
-            Kapat
-          </Button>
-        </div>
-      </div>
-    );
+    const title =
+      view.action === "reject"
+        ? "Talep reddedildi"
+        : view.action === "revise"
+          ? "Revize kaydedildi"
+          : "Talep onaylandı";
+    const message =
+      view.action === "reject"
+        ? "Talep edene red gerekçesi iletilecek."
+        : "İşlem alındı. Anahtar hazır olunca talep edene mail gider.";
+    return <ResultBanner tone="info" title={title} message={message} />;
   }
 
   const submitting = state.phase === "submitting";
@@ -118,7 +113,7 @@ export function ApprovalActions({ token, view }: Props) {
     const team = teamId.trim();
     const parallel = Number(maxParallel);
     if (!team) {
-      setState({ phase: "error", message: "LiteLLM team adı zorunlu" });
+      setState({ phase: "error", message: "LiteLLM team seçin" });
       return;
     }
     if (!Number.isFinite(parallel) || parallel < 1) {
@@ -187,7 +182,7 @@ export function ApprovalActions({ token, view }: Props) {
               <ShieldCheck className="size-5 text-primary" /> Talebi onayla
             </CardTitle>
             <CardDescription>
-              Onayladığınızda talep sağlama (provisioning) kuyruğuna alınır.
+              Onayladığınızda anahtar hazırlığı başlar; hazır olunca talep edene mail gider.
             </CardDescription>
           </CardHeader>
           {view.request_type === "mcp_server_registry" && (
@@ -230,18 +225,18 @@ export function ApprovalActions({ token, view }: Props) {
                 LiteLLM key limitleri
               </p>
               <p className="text-xs text-muted-foreground -mt-2">
-                Team adı <code>/key/generate</code> body&apos;sindeki <code>team_id</code>;
-                anlık paralel istek <code>max_parallel_requests</code> (eşzamanlı tavan, 429).
+                Team LiteLLM listesinden seçilir; anlık paralel istek{" "}
+                <code>max_parallel_requests</code> (eşzamanlı tavan, 429).
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="team-id">LiteLLM team adı</Label>
-                  <Input
+                  <Label htmlFor="team-id">LiteLLM team</Label>
+                  <LiteLLMTeamSelect
                     id="team-id"
+                    teams={view.litellm_teams ?? []}
                     value={teamId}
-                    onChange={(e) => setTeamId(e.target.value)}
-                    placeholder="örn. GENAI"
-                    maxLength={128}
+                    onChange={setTeamId}
+                    disabled={submitting}
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">

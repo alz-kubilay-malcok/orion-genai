@@ -57,6 +57,22 @@ def test_build_mcp_key_multi_server():
     assert perm["mcp_tool_permissions"] == {"document-search": ["rag"]}
 
 
+def test_teams_for_ui_dedupes():
+    from backend.src.core.litellm.generate_key import teams_for_ui
+
+    rows = teams_for_ui(
+        [
+            {"team_id": "abc", "team_alias": "GENAI"},
+            {"team_id": "abc", "team_alias": "GENAI"},
+            {"team_id": "demo", "team_name": "Demo"},
+        ]
+    )
+    assert rows == [
+        {"team_id": "demo", "team_alias": "Demo"},
+        {"team_id": "abc", "team_alias": "GENAI"},
+    ]
+
+
 def test_match_team_id_by_alias():
     teams = parse_team_list({"teams": [{"team_id": "abc", "team_alias": "GENAI"}]})
     assert match_team_id(teams, "genai") == "abc"
