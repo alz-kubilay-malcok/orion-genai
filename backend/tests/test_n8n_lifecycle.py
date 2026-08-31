@@ -19,9 +19,14 @@ from backend.src.worker.jobs.n8n_lifecycle import (
 
 
 def test_build_lifecycle_body_approved():
-    assert build_lifecycle_body(jira_issue_key="ITSM-12345", action="approve") == {
+    assert build_lifecycle_body(
+        jira_issue_key="ITSM-12345",
+        action="approve",
+        requester_email="user@allianz.com.tr",
+    ) == {
         "jira_issue_key": "ITSM-12345",
         "status": "approved",
+        "requester_email": "user@allianz.com.tr",
     }
 
 
@@ -29,12 +34,21 @@ def test_build_lifecycle_body_revise_is_approved():
     assert build_lifecycle_body(jira_issue_key="ITSM-12345", action="revise") == {
         "jira_issue_key": "ITSM-12345",
         "status": "approved",
+        "requester_email": "",
     }
 
 
 def test_build_lifecycle_body_rejected():
-    body = build_lifecycle_body(jira_issue_key="  ITSM-99  ", action=" reject ")
-    assert body == {"jira_issue_key": "ITSM-99", "status": "rejected"}
+    body = build_lifecycle_body(
+        jira_issue_key="  ITSM-99  ",
+        action=" reject ",
+        requester_email="  a@b.com  ",
+    )
+    assert body == {
+        "jira_issue_key": "ITSM-99",
+        "status": "rejected",
+        "requester_email": "a@b.com",
+    }
 
 
 def test_build_lifecycle_body_empty():
@@ -137,7 +151,11 @@ def test_post_sends_json(monkeypatch):
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("httpx.AsyncClient", return_value=mock_client):
-        out = _run(post_n8n_lifecycle(jira_issue_key="ITSM-12345", action="revise"))
+        out = _run(post_n8n_lifecycle(
+            jira_issue_key="ITSM-12345",
+            action="revise",
+            requester_email="user@allianz.com.tr",
+        ))
 
     assert out is response
     mock_client.post.assert_awaited_once()
@@ -146,6 +164,7 @@ def test_post_sends_json(monkeypatch):
     assert kwargs["json"] == {
         "jira_issue_key": "ITSM-12345",
         "status": "approved",
+        "requester_email": "user@allianz.com.tr",
     }
 
 

@@ -5,8 +5,8 @@ URL boşsa ``None`` döner (local/test no-op).
 
 Wire contract::
 
-    {"jira_issue_key": "ITSM-12345", "status": "approved"}
-    {"jira_issue_key": "ITSM-12345", "status": "rejected"}
+    {"jira_issue_key": "ITSM-12345", "status": "approved", "requester_email": "user@allianz.com.tr"}
+    {"jira_issue_key": "ITSM-12345", "status": "rejected", "requester_email": "user@allianz.com.tr"}
 
 ``status`` yalnız ``approved`` | ``rejected``. Revise+approve → ``approved``.
 
@@ -54,7 +54,12 @@ def n8n_action_for_result_status(status: str) -> str | None:
     return None
 
 
-def build_lifecycle_body(*, jira_issue_key: str, action: str) -> dict[str, str]:
+def build_lifecycle_body(
+    *,
+    jira_issue_key: str,
+    action: str,
+    requester_email: str = "",
+) -> dict[str, str]:
     """n8n webhook JSON. Ticket id Jira key formatında (ör. ITSM-12345)."""
     ticket = (jira_issue_key or "").strip()
     if not ticket:
@@ -62,6 +67,7 @@ def build_lifecycle_body(*, jira_issue_key: str, action: str) -> dict[str, str]:
     return {
         "jira_issue_key": ticket,
         "status": lifecycle_status(action),
+        "requester_email": (requester_email or "").strip(),
     }
 
 
@@ -85,14 +91,23 @@ def _timeout_seconds() -> float:
     return value if value > 0 else DEFAULT_TIMEOUT_SECONDS
 
 
-async def post_n8n_lifecycle(*, jira_issue_key: str, action: str) -> httpx.Response | None:
-    """Ticket id + approved/rejected'i n8n lifecycle webhook'una POST et. URL yoksa None."""
+async def post_n8n_lifecycle(
+    *,
+    jira_issue_key: str,
+    action: str,
+    requester_email: str = "",
+) -> httpx.Response | None:
+    """Ticket id + approved/rejected + requester_email'i n8n'e POST et. URL yoksa None."""
     url = webhook_url()
     if not url:
         logger.warning("n8n lifecycle webhook URL boş; atlandı")
         return None
 
-    body = build_lifecycle_body(jira_issue_key=jira_issue_key, action=action)
+    body = build_lifecycle_body(
+        jira_issue_key=jira_issue_key,
+        action=action,
+        requester_email=requester_email,
+    )
     timeout = _timeout_seconds()
     verify = _tls_verify()
     async with httpx.AsyncClient(

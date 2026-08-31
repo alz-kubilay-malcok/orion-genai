@@ -101,8 +101,13 @@ async def handle_notify_n8n_lifecycle(
         or str(payload.get("jira_issue_key") or "").strip()
     )
     action = str(payload.get("action") or "").strip()
+    requester_email = str(request.get("requester_email") or "").strip()
     try:
-        response = await post_n8n_lifecycle(jira_issue_key=ticket, action=action)
+        response = await post_n8n_lifecycle(
+            jira_issue_key=ticket,
+            action=action,
+            requester_email=requester_email,
+        )
     except ValueError as exc:
         raise PermanentError(str(exc)) from exc
     except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
