@@ -142,12 +142,15 @@ async def _enqueue_request_job(
     session: AsyncSession, *,
     request_id: uuid.UUID,
     job_type_value: str,
+    extra: Mapping[str, object] | None = None,
 ) -> None:
-    payload = {
+    payload: dict[str, object] = {
         "job_type": job_type_value,
         "request_id": str(request_id),
         "schema_version": 1,
     }
+    if extra:
+        payload.update(extra)
     job = OutboxJob(
         id=uuid.uuid4(),
         job_type=job_type_value,

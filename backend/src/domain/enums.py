@@ -78,6 +78,7 @@ class OutboxJobType(str, Enum):
     SEND_RESULT_MAIL = "send:result_mail"
     SEND_APPROVAL_MAIL = "send:approval_mail"
     SEND_LITELLM_DOWN_NOTICE = "send:litellm_down_notice"
+    NOTIFY_N8N_LIFECYCLE = "notify:n8n_lifecycle"
 
 
 class Environment(str, Enum):

@@ -75,6 +75,11 @@ async def handle_send_result_mail(
         "send_result_mail: delivered",
         extra={"request_id": str(request_id), "to": request["requester_email"]},
     )
+    from .n8n_lifecycle import enqueue_n8n_after_result_mail
+
+    await enqueue_n8n_after_result_mail(
+        session, request_id=request_id, request=request,
+    )
 
 
 async def _handle_send_approval_mail(
