@@ -11,6 +11,7 @@ from backend.src.api.auth.dependencies import get_current_superuser
 from backend.src.api.routes.batch_keys import router
 from backend.src.core.batch_keys.excel import (
     BatchExcelError,
+    build_result_csv,
     build_template_xlsx,
     parse_batch_excel,
 )
@@ -59,6 +60,30 @@ def test_parse_excel_rejects_bad_email():
 def test_template_roundtrip():
     rows = parse_batch_excel(build_template_xlsx(), model_name="allianz-text")
     assert rows[0].email == "ali.veli@allianz.com.tr"
+
+
+def test_result_csv_appends_api_key_column():
+    csv_bytes = build_result_csv(
+        ["email", "name"],
+        [["ali@allianz.com.tr", "Ali"]],
+        ["sk-from-test"],
+    )
+    text = csv_bytes.decode("utf-8-sig")
+    lines = [line for line in text.splitlines() if line]
+    assert lines[0] == "email,name,api_key"
+    assert lines[1] == "ali@allianz.com.tr,Ali,sk-from-test"
+
+
+def test_result_csv_overwrites_existing_api_key_column():
+    csv_bytes = build_result_csv(
+        ["email", "api_key"],
+        [["ali@allianz.com.tr", "old"]],
+        ["sk-new"],
+    )
+    text = csv_bytes.decode("utf-8-sig")
+    assert "email,api_key" in text.splitlines()[0]
+    assert "sk-new" in text
+    assert "old" not in text
 
 
 def test_process_batch_generates_and_mails():
@@ -204,10 +229,12 @@ def test_batch_keys_endpoint_xlsx_and_model(monkeypatch):
         },
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["succeeded"] == 1
-    assert body["results"][0]["api_key"] == "sk-from-test"
-    assert body["send_mail"] is True
+    assert "text/csv" in response.headers["content-type"]
+    assert "orion-batch-keys.csv" in response.headers["content-disposition"]
+    text = response.content.decode("utf-8-sig")
+    assert "api_key" in text.splitlines()[0]
+    assert "sk-from-test" in text
+    assert response.headers["x-batch-succeeded"] == "1"
 
 
 def test_batch_keys_rejects_non_xlsx(monkeypatch):

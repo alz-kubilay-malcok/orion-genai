@@ -389,32 +389,7 @@ export async function deleteLdapMapping(id: string): Promise<void> {
   if (!res.ok) throw new Error("Mapping silinemedi");
 }
 
-// ---- Batch LiteLLM keys (Excel) --------------------------------------
-
-export const batchKeyRowSchema = z.object({
-  row: z.number(),
-  email: z.string(),
-  name: z.string(),
-  key_alias: z.string(),
-  team: z.string(),
-  environment: z.string(),
-  ok: z.boolean(),
-  api_key: z.string(),
-  mailed: z.boolean(),
-  error: z.string(),
-});
-export type BatchKeyRow = z.infer<typeof batchKeyRowSchema>;
-
-export const batchKeysResultSchema = z.object({
-  model_name: z.string(),
-  send_mail: z.boolean(),
-  environment: z.string(),
-  total: z.number(),
-  succeeded: z.number(),
-  failed: z.number(),
-  results: z.array(batchKeyRowSchema),
-});
-export type BatchKeysResult = z.infer<typeof batchKeysResultSchema>;
+// ---- Batch LiteLLM keys (Excel → CSV) --------------------------------
 
 const BATCH_ERROR_LABELS: Record<string, string> = {
   MODEL_NAME_REQUIRED: "Model adı zorunlu",
@@ -425,18 +400,21 @@ const BATCH_ERROR_LABELS: Record<string, string> = {
   INVALID_EXCEL: "Excel okunamadı",
 };
 
-export async function downloadBatchKeysTemplate(): Promise<void> {
-  const res = await adminFetch("/admin/batch-keys/template");
-  if (!res.ok) throw new Error("Şablon indirilemedi");
-  const blob = await res.blob();
+function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "orion-batch-keys.xlsx";
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadBatchKeysTemplate(): Promise<void> {
+  const res = await adminFetch("/admin/batch-keys/template");
+  if (!res.ok) throw new Error("Şablon indirilemedi");
+  triggerDownload(await res.blob(), "orion-batch-keys.xlsx");
 }
 
 export async function submitBatchKeys(params: {
@@ -444,18 +422,18 @@ export async function submitBatchKeys(params: {
   modelName: string;
   sendMail: boolean;
   environment?: string;
-}): Promise<BatchKeysResult> {
+}): Promise<void> {
   const body = new FormData();
   body.append("file", params.file);
   body.append("model_name", params.modelName);
   body.append("send_mail", params.sendMail ? "true" : "false");
   if (params.environment) body.append("environment", params.environment);
   const res = await adminFetch("/admin/batch-keys", { method: "POST", body });
-  const json = await res.json().catch(() => ({}));
   if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
     const code = typeof json.error_code === "string" ? json.error_code : "";
     const detail = typeof json.detail === "string" ? json.detail : "";
     throw new Error(detail || BATCH_ERROR_LABELS[code] || "Batch key üretilemedi");
   }
-  return batchKeysResultSchema.parse(json);
+  triggerDownload(await res.blob(), "orion-batch-keys.csv");
 }

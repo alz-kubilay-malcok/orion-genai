@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import re
 from dataclasses import dataclass
-from io import BytesIO
-from typing import Any
+from io import BytesIO, StringIO
+from typing import Any, Sequence
 
 from backend.src.core.naming import build_litellm_key_alias
 
@@ -64,6 +65,13 @@ class BatchRow:
     max_parallel_requests: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class ParsedSheet:
+    rows: list[BatchRow]
+    headers: list[str]
+    values: list[list[str]]
+
+
 def _norm_header(raw: object) -> str:
     text = str(raw or "").strip().translate(_TR_FOLD).casefold()
     return _NON_ALNUM.sub("_", text).strip("_")
@@ -110,6 +118,18 @@ def parse_batch_excel(
     default_environment: str = "DEV",
 ) -> list[BatchRow]:
     """İlk sheet'i oku. ``email`` zorunlu; diğer kolonlar opsiyonel."""
+    return parse_batch_workbook(
+        data, model_name=model_name, default_environment=default_environment,
+    ).rows
+
+
+def parse_batch_workbook(
+    data: bytes,
+    *,
+    model_name: str,
+    default_environment: str = "DEV",
+) -> ParsedSheet:
+    """Orijinal başlık/değerlerle birlikte parse et (CSV çıktısı için)."""
     from openpyxl import load_workbook
 
     try:
@@ -124,8 +144,13 @@ def parse_batch_excel(
         header_raw = next(iterator, None)
         if not header_raw:
             raise BatchExcelError("Excel'de başlık satırı yok")
+        headers = [_cell(cell) for cell in header_raw]
+        while headers and not headers[-1]:
+            headers.pop()
+        if not headers:
+            raise BatchExcelError("Excel'de başlık satırı yok")
         mapping: dict[int, str] = {}
-        for index, cell in enumerate(header_raw):
+        for index, cell in enumerate(headers):
             field = _HEADER_ALIASES.get(_norm_header(cell))
             if field and field not in mapping.values():
                 mapping[index] = field
@@ -135,11 +160,16 @@ def parse_batch_excel(
             )
 
         rows: list[BatchRow] = []
-        for excel_row, values in enumerate(iterator, start=2):
-            cells = list(values or ())
-            if not any(_cell(v) for v in cells):
+        values: list[list[str]] = []
+        for excel_row, raw in enumerate(iterator, start=2):
+            cells = [_cell(v) for v in list(raw or ())]
+            if not any(cells):
                 continue
-            parsed: dict[str, Any] = {field: _cell(cells[i]) if i < len(cells) else "" for i, field in mapping.items()}
+            padded = cells[: len(headers)] + [""] * max(0, len(headers) - len(cells))
+            parsed: dict[str, Any] = {
+                field: padded[i] if i < len(padded) else ""
+                for i, field in mapping.items()
+            }
             email = parsed.get("email", "").strip()
             if not email:
                 raise BatchExcelError(f"Satır {excel_row}: email boş")
@@ -166,13 +196,45 @@ def parse_batch_excel(
                     max_parallel_requests=_int_or_none(parsed.get("max_parallel_requests")),
                 )
             )
+            values.append(padded)
             if len(rows) > MAX_BATCH_ROWS:
                 raise BatchExcelError(f"En fazla {MAX_BATCH_ROWS} satır işlenir")
         if not rows:
             raise BatchExcelError("Excel'de işlenecek satır yok")
-        return rows
+        return ParsedSheet(rows=rows, headers=headers, values=values)
     finally:
         workbook.close()
+
+
+def build_result_csv(
+    headers: Sequence[str],
+    values: Sequence[Sequence[str]],
+    api_keys: Sequence[str],
+) -> bytes:
+    """Kaynak kolonların sonuna (veya mevcut `api_key` kolonuna) key basar."""
+    if len(values) != len(api_keys):
+        raise BatchExcelError("CSV satır sayısı key sayısıyla uyuşmuyor")
+    out_headers = list(headers)
+    key_index = next(
+        (i for i, name in enumerate(out_headers) if _norm_header(name) == "api_key"),
+        None,
+    )
+    if key_index is None:
+        out_headers.append("api_key")
+        key_index = len(out_headers) - 1
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(out_headers)
+    width = len(out_headers)
+    for raw, api_key in zip(values, api_keys, strict=True):
+        line = [_cell(v) for v in raw]
+        if len(line) < width:
+            line.extend([""] * (width - len(line)))
+        elif len(line) > width:
+            line = line[:width]
+        line[key_index] = api_key
+        writer.writerow(line)
+    return buffer.getvalue().encode("utf-8-sig")
 
 
 def build_template_xlsx() -> bytes:
@@ -194,6 +256,9 @@ __all__ = [
     "TEMPLATE_HEADERS",
     "BatchExcelError",
     "BatchRow",
+    "ParsedSheet",
+    "build_result_csv",
     "build_template_xlsx",
     "parse_batch_excel",
+    "parse_batch_workbook",
 ]

@@ -11,8 +11,9 @@ from fastapi.responses import JSONResponse, Response
 from backend.src.api.auth.dependencies import get_current_superuser
 from backend.src.core.batch_keys import (
     BatchExcelError,
+    build_result_csv,
     build_template_xlsx,
-    parse_batch_excel,
+    parse_batch_workbook,
     process_batch,
 )
 from backend.src.core.litellm.target import resolve_litellm_http
@@ -51,8 +52,8 @@ async def create_batch_keys(
     model_name: Annotated[str, Form(...)],
     send_mail: Annotated[str, Form()] = "false",
     environment: Annotated[str, Form()] = "DEV",
-) -> JSONResponse:
-    """Excel satırları için LiteLLM virtual key üretir; `send_mail` ise mail atar.
+) -> Response:
+    """Excel satırları için LiteLLM virtual key üretir; CSV döner (`api_key` kolonu).
 
     Form: ``file`` (.xlsx), ``model_name``, ``send_mail`` (true/false),
     ``environment`` (satırda yoksa varsayılan, default DEV).
@@ -81,7 +82,7 @@ async def create_batch_keys(
         )
 
     try:
-        rows = parse_batch_excel(
+        sheet = parse_batch_workbook(
             data, model_name=model, default_environment=default_env,
         )
     except BatchExcelError as exc:
@@ -92,24 +93,26 @@ async def create_batch_keys(
 
     logger.info(
         "batch-keys start rows=%s model=%s send_mail=%s by=%s",
-        len(rows), model, mail, _user.username,
+        len(sheet.rows), model, mail, _user.username,
     )
     results = await process_batch(
-        rows,
+        sheet.rows,
         model_name=model,
         send_mail=mail,
         metadata={"source": "admin_batch_keys", "actor": _user.username},
     )
-    succeeded = sum(1 for item in results if item.ok)
-    failed = len(results) - succeeded
-    return JSONResponse(
-        content={
-            "model_name": model,
-            "send_mail": mail,
-            "environment": default_env,
-            "total": len(results),
-            "succeeded": succeeded,
-            "failed": failed,
-            "results": [item.as_dict() for item in results],
-        }
+    csv_bytes = build_result_csv(
+        sheet.headers,
+        sheet.values,
+        [item.api_key for item in results],
+    )
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="orion-batch-keys.csv"',
+            "X-Batch-Total": str(len(results)),
+            "X-Batch-Succeeded": str(sum(1 for item in results if item.ok)),
+            "X-Batch-Failed": str(sum(1 for item in results if not item.ok)),
+        },
     )
