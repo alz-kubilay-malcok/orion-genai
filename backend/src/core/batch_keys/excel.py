@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from backend.src.core.naming import build_litellm_key_alias
 
 MAX_BATCH_ROWS = 200
-TEMPLATE_HEADERS = ("email", "name", "key_alias", "team", "environment")
+TEMPLATE_HEADERS = ("email", "name", "key_alias", "team", "environment", "max_parallel_requests")
 
 _HEADER_ALIASES: dict[str, str] = {
     "email": "email",
@@ -245,7 +245,7 @@ def build_template_xlsx() -> bytes:
     assert sheet is not None
     sheet.title = "batch"
     sheet.append(list(TEMPLATE_HEADERS))
-    sheet.append(["ali.veli@allianz.com.tr", "Ali Veli", "", "GENAI", "DEV"])
+    sheet.append(["ali.veli@allianz.com.tr", "Ali Veli", "", "GENAI", "DEV", 5])
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()

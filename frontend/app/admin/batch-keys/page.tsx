@@ -19,13 +19,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const INPUT_EXAMPLE = `email,name,key_alias,team,environment
-ali.veli@allianz.com.tr,Ali Veli,,GENAI,DEV
-ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,,HASAR,DEV`;
+const INPUT_EXAMPLE = `email,name,key_alias,team,environment,max_parallel_requests
+ali.veli@allianz.com.tr,Ali Veli,,GENAI,DEV,5
+ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,,HASAR,DEV,`;
 
-const OUTPUT_EXAMPLE = `email,name,key_alias,team,environment,api_key
-ali.veli@allianz.com.tr,Ali Veli,ALZ-GENAI-ALIVELI2-DEV-ALLIANZ-TEXT,GENAI,DEV,sk-...
-ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,ALZ-HASAR-AYSEYILMAZ3-DEV-ALLIANZ-TEXT,HASAR,DEV,sk-...`;
+const OUTPUT_EXAMPLE = `email,name,key_alias,team,environment,max_parallel_requests,api_key
+ali.veli@allianz.com.tr,Ali Veli,ALZ-GENAI-ALIVELI2-DEV-ALLIANZ-TEXT,GENAI,DEV,5,sk-...
+ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,ALZ-HASAR-AYSEYILMAZ3-DEV-ALLIANZ-TEXT,HASAR,DEV,,sk-...`;
 
 const COLUMNS: { name: string; required: boolean; note: string }[] = [
   { name: "email", required: true, note: "eposta, talep_eden_eposta" },
@@ -33,6 +33,11 @@ const COLUMNS: { name: string; required: boolean; note: string }[] = [
   { name: "key_alias", required: false, note: "alias — boşsa otomatik üretilir" },
   { name: "team", required: false, note: "departman, litellm_team_id" },
   { name: "environment", required: false, note: "ortam — yoksa formdaki varsayılan" },
+  {
+    name: "max_parallel_requests",
+    required: false,
+    note: "max_concurrent_requests, maksimum_es_zamanli_istek — boşsa LiteLLM'e limit gitmez",
+  },
 ];
 
 function CsvSample({ label, sample }: { label: string; sample: string }) {
