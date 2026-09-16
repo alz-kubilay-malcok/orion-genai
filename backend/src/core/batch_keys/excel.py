@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from backend.src.core.naming import build_litellm_key_alias
 
 MAX_BATCH_ROWS = 200
-TEMPLATE_HEADERS = ("email", "name", "key_alias", "team", "environment", "max_parallel_requests")
+TEMPLATE_HEADERS = ("email", "name", "key_alias", "team", "environment")
 
 _HEADER_ALIASES: dict[str, str] = {
     "email": "email",
@@ -38,9 +38,6 @@ _HEADER_ALIASES: dict[str, str] = {
     "litellm_team_id": "team",
     "environment": "environment",
     "ortam": "environment",
-    "max_parallel_requests": "max_parallel_requests",
-    "max_concurrent_requests": "max_parallel_requests",
-    "maksimum_es_zamanli_istek": "max_parallel_requests",
 }
 
 _TR_FOLD = str.maketrans({
@@ -62,7 +59,6 @@ class BatchRow:
     key_alias: str
     team: str
     environment: str
-    max_parallel_requests: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,17 +84,6 @@ def _email_ok(value: str) -> bool:
         return False
     local, _, domain = value.partition("@")
     return bool(local) and "." in domain
-
-
-def _int_or_none(value: object) -> int | None:
-    text = _cell(value)
-    if not text:
-        return None
-    try:
-        number = int(float(text))
-    except (TypeError, ValueError):
-        return None
-    return number if number >= 1 else None
 
 
 def _default_alias(*, team: str, email: str, row: int, environment: str, model_name: str) -> str:
@@ -193,7 +178,6 @@ def parse_batch_workbook(
                     key_alias=alias,
                     team=team,
                     environment=environment,
-                    max_parallel_requests=_int_or_none(parsed.get("max_parallel_requests")),
                 )
             )
             values.append(padded)
@@ -245,7 +229,7 @@ def build_template_xlsx() -> bytes:
     assert sheet is not None
     sheet.title = "batch"
     sheet.append(list(TEMPLATE_HEADERS))
-    sheet.append(["ali.veli@allianz.com.tr", "Ali Veli", "", "GENAI", "DEV", 5])
+    sheet.append(["ali.veli@allianz.com.tr", "Ali Veli", "", "GENAI", "DEV"])
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()

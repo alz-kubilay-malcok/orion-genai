@@ -19,13 +19,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const INPUT_EXAMPLE = `email,name,key_alias,team,environment,max_parallel_requests
-ali.veli@allianz.com.tr,Ali Veli,,GENAI,DEV,5
-ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,,HASAR,DEV,`;
+const INPUT_EXAMPLE = `email,name,key_alias,team,environment
+ali.veli@allianz.com.tr,Ali Veli,,GENAI,DEV
+ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,,HASAR,DEV`;
 
-const OUTPUT_EXAMPLE = `email,name,key_alias,team,environment,max_parallel_requests,api_key
-ali.veli@allianz.com.tr,Ali Veli,ALZ-GENAI-ALIVELI2-DEV-ALLIANZ-TEXT,GENAI,DEV,5,sk-...
-ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,ALZ-HASAR-AYSEYILMAZ3-DEV-ALLIANZ-TEXT,HASAR,DEV,,sk-...`;
+const OUTPUT_EXAMPLE = `email,name,key_alias,team,environment,api_key
+ali.veli@allianz.com.tr,Ali Veli,ALZ-GENAI-ALIVELI2-DEV-ALLIANZ-TEXT,GENAI,DEV,sk-...
+ayse.yilmaz@allianz.com.tr,Ayşe Yılmaz,ALZ-HASAR-AYSEYILMAZ3-DEV-ALLIANZ-TEXT,HASAR,DEV,sk-...`;
 
 const COLUMNS: { name: string; required: boolean; note: string }[] = [
   { name: "email", required: true, note: "eposta, talep_eden_eposta" },
@@ -33,11 +33,6 @@ const COLUMNS: { name: string; required: boolean; note: string }[] = [
   { name: "key_alias", required: false, note: "alias — boşsa otomatik üretilir" },
   { name: "team", required: false, note: "departman, litellm_team_id" },
   { name: "environment", required: false, note: "ortam — yoksa formdaki varsayılan" },
-  {
-    name: "max_parallel_requests",
-    required: false,
-    note: "max_concurrent_requests, maksimum_es_zamanli_istek — boşsa LiteLLM'e limit gitmez",
-  },
 ];
 
 function CsvSample({ label, sample }: { label: string; sample: string }) {
@@ -98,8 +93,8 @@ function FormatCard() {
         <CsvSample label="Girdi örneği" sample={INPUT_EXAMPLE} />
         <CsvSample label="Dönen CSV" sample={OUTPUT_EXAMPLE} />
         <p className="text-xs text-muted-foreground">
-          Ayırıcı virgül. En fazla 200 satır. Model adı formdan gelir, Excel’de
-          model kolonu gerekmez.
+          Ayırıcı virgül. En fazla 200 satır. Model adı ve max parallel request
+          formdan gelir; Excel’de bu kolonlar gerekmez.
         </p>
       </CardContent>
     </Card>
@@ -111,6 +106,7 @@ function BatchKeysContent() {
   const [file, setFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState("");
   const [environment, setEnvironment] = useState("DEV");
+  const [maxParallel, setMaxParallel] = useState("");
   const [sendMail, setSendMail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +128,7 @@ function BatchKeysContent() {
         modelName: modelName.trim(),
         sendMail,
         environment: environment.trim() || "DEV",
+        maxParallelRequests: maxParallel.trim(),
       });
       setDone(true);
     } catch (err) {
@@ -182,6 +179,21 @@ function BatchKeysContent() {
                 onChange={(event) => setEnvironment(event.target.value)}
                 placeholder="DEV"
               />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="max-parallel">Max parallel request</Label>
+              <Input
+                id="max-parallel"
+                type="number"
+                min={1}
+                value={maxParallel}
+                onChange={(event) => setMaxParallel(event.target.value)}
+                placeholder="boş = limitsiz"
+              />
+              <p className="text-xs text-muted-foreground">
+                Tüm satırlara uygulanır. Eşzamanlı istek tavanı; boş bırakılırsa
+                LiteLLM’e limit gitmez.
+              </p>
             </div>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox

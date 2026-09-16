@@ -32,6 +32,16 @@ def _as_bool(value: str | bool) -> bool:
     return str(value).strip().lower() in _TRUE
 
 
+def _as_optional_int(value: str) -> int | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    number = int(text)
+    if number < 1:
+        raise ValueError("max_parallel_requests en az 1 olmalı")
+    return number
+
+
 @router.get("/batch-keys/template")
 async def download_batch_template(
     _user: Annotated[User, Depends(get_current_superuser)],
@@ -52,17 +62,25 @@ async def create_batch_keys(
     model_name: Annotated[str, Form(...)],
     send_mail: Annotated[str, Form()] = "false",
     environment: Annotated[str, Form()] = "DEV",
+    max_parallel_requests: Annotated[str, Form()] = "",
 ) -> Response:
     """Excel satırları için LiteLLM virtual key üretir; CSV döner (`api_key` kolonu).
 
     Form: ``file`` (.xlsx), ``model_name``, ``send_mail`` (true/false),
-    ``environment`` (satırda yoksa varsayılan, default DEV).
+    ``environment`` (satırda yoksa varsayılan, default DEV),
+    ``max_parallel_requests`` (tüm satırlara, boşsa LiteLLM'e gitmez).
     """
     model = (model_name or "").strip()
     if not model:
         return JSONResponse(status_code=422, content={"error_code": "MODEL_NAME_REQUIRED"})
     default_env = (environment or "DEV").strip().upper() or "DEV"
     mail = _as_bool(send_mail)
+    try:
+        parallel = _as_optional_int(max_parallel_requests)
+    except ValueError:
+        return JSONResponse(
+            status_code=422, content={"error_code": "INVALID_MAX_PARALLEL"},
+        )
 
     filename = (file.filename or "").lower()
     if not filename.endswith(".xlsx"):
@@ -92,13 +110,14 @@ async def create_batch_keys(
         )
 
     logger.info(
-        "batch-keys start rows=%s model=%s send_mail=%s by=%s",
-        len(sheet.rows), model, mail, _user.username,
+        "batch-keys start rows=%s model=%s send_mail=%s parallel=%s by=%s",
+        len(sheet.rows), model, mail, parallel, _user.username,
     )
     results = await process_batch(
         sheet.rows,
         model_name=model,
         send_mail=mail,
+        max_parallel_requests=parallel,
         metadata={"source": "admin_batch_keys", "actor": _user.username},
     )
     csv_bytes = build_result_csv(

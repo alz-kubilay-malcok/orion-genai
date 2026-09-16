@@ -398,6 +398,7 @@ const BATCH_ERROR_LABELS: Record<string, string> = {
   FILE_TOO_LARGE: "Dosya 5 MB sınırını aşıyor",
   LITELLM_NOT_CONFIGURED: "LiteLLM adresi veya master key yok",
   INVALID_EXCEL: "Excel okunamadı",
+  INVALID_MAX_PARALLEL: "Max parallel request en az 1 olmalı",
 };
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -422,12 +423,16 @@ export async function submitBatchKeys(params: {
   modelName: string;
   sendMail: boolean;
   environment?: string;
+  maxParallelRequests?: string;
 }): Promise<void> {
   const body = new FormData();
   body.append("file", params.file);
   body.append("model_name", params.modelName);
   body.append("send_mail", params.sendMail ? "true" : "false");
   if (params.environment) body.append("environment", params.environment);
+  if (params.maxParallelRequests) {
+    body.append("max_parallel_requests", params.maxParallelRequests);
+  }
   const res = await adminFetch("/admin/batch-keys", { method: "POST", body });
   if (!res.ok) {
     const json = await res.json().catch(() => ({}));

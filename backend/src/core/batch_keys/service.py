@@ -50,6 +50,7 @@ def _send_result_mail(
     model_name: str,
     api_key: str,
     mailer: SendMail,
+    max_parallel_requests: int | None,
 ) -> bool:
     from backend.src.core.mailing.result_inputs import litellm_result_inputs
 
@@ -63,7 +64,7 @@ def _send_result_mail(
             "models": [model_name],
             "key_alias": row.key_alias,
             "litellm_team_id": row.team,
-            "max_concurrent_requests": row.max_parallel_requests,
+            "max_concurrent_requests": max_parallel_requests,
         },
         api_key=api_key,
     )
@@ -80,6 +81,7 @@ async def process_batch(
     *,
     model_name: str,
     send_mail: bool,
+    max_parallel_requests: int | None = None,
     generate_key: GenerateKey | None = None,
     mailer: SendMail | None = None,
     metadata: Mapping[str, object] | None = None,
@@ -92,7 +94,7 @@ async def process_batch(
                 key_alias=row.key_alias,
                 models=[model_name],
                 team_id=row.team or None,
-                max_parallel_requests=row.max_parallel_requests,
+                max_parallel_requests=max_parallel_requests,
                 environment=row.environment,
                 metadata=dict(metadata or {}),
             )
@@ -140,6 +142,7 @@ async def process_batch(
                         model_name=model_name,
                         api_key=plaintext,
                         mailer=mailer or _default_mailer,
+                        max_parallel_requests=max_parallel_requests,
                     )
                 )
                 if not mailed:

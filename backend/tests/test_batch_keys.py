@@ -96,13 +96,13 @@ def test_process_batch_generates_and_mails():
         key_alias="ALZ-GENAI-ALI-DEV-TEXT",
         team="GENAI",
         environment="DEV",
-        max_parallel_requests=None,
     )
     mailed: list[str] = []
 
     async def generate(**kwargs):
         assert kwargs["models"] == ["allianz-text"]
         assert kwargs["key_alias"] == row.key_alias
+        assert kwargs["max_parallel_requests"] == 5
         return ("sk-live-key", "tok-1")
 
     def mailer(**kwargs):
@@ -115,6 +115,7 @@ def test_process_batch_generates_and_mails():
             [row],
             model_name="allianz-text",
             send_mail=True,
+            max_parallel_requests=5,
             generate_key=generate,
             mailer=mailer,
         )
@@ -129,8 +130,8 @@ def test_process_batch_continues_after_row_error():
     from backend.src.core.batch_keys.excel import BatchRow
 
     rows = [
-        BatchRow(2, "a@allianz.com.tr", "A", "alias-a", "", "DEV", None),
-        BatchRow(3, "b@allianz.com.tr", "B", "alias-b", "", "DEV", None),
+        BatchRow(2, "a@allianz.com.tr", "A", "alias-a", "", "DEV"),
+        BatchRow(3, "b@allianz.com.tr", "B", "alias-b", "", "DEV"),
     ]
 
     async def generate(**kwargs):
@@ -150,7 +151,7 @@ def test_process_batch_continues_after_row_error():
 def test_process_batch_skips_mail_when_flag_false():
     from backend.src.core.batch_keys.excel import BatchRow
 
-    row = BatchRow(2, "a@allianz.com.tr", "A", "alias-a", "", "DEV", None)
+    row = BatchRow(2, "a@allianz.com.tr", "A", "alias-a", "", "DEV")
     called = {"mail": 0}
 
     async def generate(**kwargs):
@@ -194,6 +195,7 @@ def test_batch_keys_endpoint_xlsx_and_model(monkeypatch):
 
         assert kwargs["model_name"] == "allianz-text"
         assert kwargs["send_mail"] is True
+        assert kwargs["max_parallel_requests"] == 5
         return [
             BatchRowResult(
                 row=rows[0].row,
@@ -219,6 +221,7 @@ def test_batch_keys_endpoint_xlsx_and_model(monkeypatch):
             "model_name": "allianz-text",
             "send_mail": "true",
             "environment": "DEV",
+            "max_parallel_requests": "5",
         },
         files={
             "file": (
@@ -246,6 +249,27 @@ def test_batch_keys_rejects_non_xlsx(monkeypatch):
     )
     assert response.status_code == 422
     assert response.json()["error_code"] == "XLSX_REQUIRED"
+
+
+def test_batch_keys_rejects_bad_max_parallel(monkeypatch):
+    client = _client(monkeypatch)
+    data = _xlsx(["email"], [["ali@allianz.com.tr"]])
+    response = client.post(
+        "/admin/batch-keys",
+        data={
+            "model_name": "allianz-text",
+            "max_parallel_requests": "0",
+        },
+        files={
+            "file": (
+                "keys.xlsx",
+                data,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "INVALID_MAX_PARALLEL"
 
 
 def test_batch_template_download(monkeypatch):
