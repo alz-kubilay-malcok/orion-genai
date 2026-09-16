@@ -193,13 +193,102 @@ def build_mcp_key_generate_body(
     return body
 
 
+class LiteLLMKeyError(Exception):
+    """LiteLLM `/key/generate` başarısız. ``retryable`` geçici ağ/5xx."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+async def generate_litellm_virtual_key(
+    *,
+    key_alias: str,
+    models: list[str] | None,
+    team_id: str | None,
+    max_parallel_requests: int | None = None,
+    environment: str | None = None,
+    metadata: Mapping[str, object] | None = None,
+) -> tuple[str, str]:
+    """Canlı ``POST /key/generate``. Dönüş: ``(plaintext_key, provider_id)``."""
+    import os
+
+    import httpx
+
+    from backend.src.core.litellm.target import resolve_litellm_http
+
+    base, credential = resolve_litellm_http(environment, kind="litellm")
+    path = os.getenv("LITELLM_KEY_GENERATE_PATH", "/key/generate").strip() or "/key/generate"
+    if not path.startswith("/"):
+        path = "/" + path
+    if not base or not credential:
+        raise LiteLLMKeyError("LiteLLM base URL veya master key yok", retryable=False)
+
+    url = f"{base.rstrip('/')}{path}"
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        resolved_team = (team_id or "").strip()
+        if resolved_team:
+            list_url = f"{base.rstrip('/')}{TEAM_LIST_PATH}"
+            try:
+                listed = await client.get(
+                    list_url,
+                    headers={"Authorization": f"Bearer {credential}"},
+                )
+            except (httpx.ConnectError, httpx.TimeoutException, OSError):
+                listed = None
+            if listed is not None and listed.status_code < 400:
+                try:
+                    matched = match_team_id(parse_team_list(listed.json()), resolved_team)
+                except ValueError:
+                    matched = None
+                if matched:
+                    resolved_team = matched
+        body = build_key_generate_body(
+            key_alias=key_alias,
+            models=list(models or []),
+            team_id=resolved_team or None,
+            max_parallel_requests=max_parallel_requests,
+            metadata=metadata,
+        )
+        try:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {credential}"},
+                json=body,
+            )
+        except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
+            raise LiteLLMKeyError(f"LiteLLM unreachable: {exc}", retryable=True) from exc
+        snippet = (response.text or "")[:500]
+        if response.status_code in {429, 502, 503, 504}:
+            raise LiteLLMKeyError(
+                f"LiteLLM http {response.status_code}: {snippet}",
+                retryable=True,
+            )
+        if response.status_code >= 400:
+            raise LiteLLMKeyError(
+                f"LiteLLM http {response.status_code}: {snippet}",
+                retryable=False,
+            )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise LiteLLMKeyError("LiteLLM non-json response", retryable=True) from exc
+    plaintext = str(data.get("key") or data.get("token") or "").strip()
+    provider_id = str(data.get("token_id") or data.get("key_id") or "")
+    if not plaintext:
+        raise LiteLLMKeyError("LiteLLM response missing key", retryable=False)
+    return plaintext, provider_id
+
+
 __all__ = [
     "LITELLM_MODEL_ROUTES",
     "MCP_NO_LLM_MODELS",
     "TEAM_LIST_PATH",
+    "LiteLLMKeyError",
     "build_key_generate_body",
     "build_mcp_key_generate_body",
     "fetch_litellm_teams",
+    "generate_litellm_virtual_key",
     "match_team_id",
     "mcp_key_generate_path",
     "parse_team_list",

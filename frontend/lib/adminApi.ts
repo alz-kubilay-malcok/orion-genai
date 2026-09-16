@@ -64,7 +64,9 @@ async function adminFetch(
   init?: RequestInit & { retry?: boolean },
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
-  if (init?.body && !headers.has("Content-Type")) {
+  const isFormData =
+    typeof FormData !== "undefined" && init?.body instanceof FormData;
+  if (init?.body && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const access = readAccessToken();
@@ -385,4 +387,75 @@ export async function deleteLdapMapping(id: string): Promise<void> {
   });
   if (res.status === 404) throw new Error("Mapping bulunamadı");
   if (!res.ok) throw new Error("Mapping silinemedi");
+}
+
+// ---- Batch LiteLLM keys (Excel) --------------------------------------
+
+export const batchKeyRowSchema = z.object({
+  row: z.number(),
+  email: z.string(),
+  name: z.string(),
+  key_alias: z.string(),
+  team: z.string(),
+  environment: z.string(),
+  ok: z.boolean(),
+  api_key: z.string(),
+  mailed: z.boolean(),
+  error: z.string(),
+});
+export type BatchKeyRow = z.infer<typeof batchKeyRowSchema>;
+
+export const batchKeysResultSchema = z.object({
+  model_name: z.string(),
+  send_mail: z.boolean(),
+  environment: z.string(),
+  total: z.number(),
+  succeeded: z.number(),
+  failed: z.number(),
+  results: z.array(batchKeyRowSchema),
+});
+export type BatchKeysResult = z.infer<typeof batchKeysResultSchema>;
+
+const BATCH_ERROR_LABELS: Record<string, string> = {
+  MODEL_NAME_REQUIRED: "Model adı zorunlu",
+  XLSX_REQUIRED: "Yalnız .xlsx dosyası kabul edilir",
+  EMPTY_FILE: "Dosya boş",
+  FILE_TOO_LARGE: "Dosya 5 MB sınırını aşıyor",
+  LITELLM_NOT_CONFIGURED: "LiteLLM adresi veya master key yok",
+  INVALID_EXCEL: "Excel okunamadı",
+};
+
+export async function downloadBatchKeysTemplate(): Promise<void> {
+  const res = await adminFetch("/admin/batch-keys/template");
+  if (!res.ok) throw new Error("Şablon indirilemedi");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "orion-batch-keys.xlsx";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function submitBatchKeys(params: {
+  file: File;
+  modelName: string;
+  sendMail: boolean;
+  environment?: string;
+}): Promise<BatchKeysResult> {
+  const body = new FormData();
+  body.append("file", params.file);
+  body.append("model_name", params.modelName);
+  body.append("send_mail", params.sendMail ? "true" : "false");
+  if (params.environment) body.append("environment", params.environment);
+  const res = await adminFetch("/admin/batch-keys", { method: "POST", body });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const code = typeof json.error_code === "string" ? json.error_code : "";
+    const detail = typeof json.detail === "string" ? json.detail : "";
+    throw new Error(detail || BATCH_ERROR_LABELS[code] || "Batch key üretilemedi");
+  }
+  return batchKeysResultSchema.parse(json);
 }

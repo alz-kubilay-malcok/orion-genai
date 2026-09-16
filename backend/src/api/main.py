@@ -20,6 +20,7 @@ from backend.src.api.routes import (
     admin_ldap,
     approval_actions,
     auth,
+    batch_keys,
     health,
     internal,
     mcp_catalog,
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     application.include_router(orion_webhook.router, prefix="/webhooks")
     application.include_router(auth.router)
     application.include_router(admin.router)
+    application.include_router(batch_keys.router)
     application.include_router(admin_directory.router)
     application.include_router(admin_ldap.router)
     application.include_router(approval_actions.router, prefix="/actions")
