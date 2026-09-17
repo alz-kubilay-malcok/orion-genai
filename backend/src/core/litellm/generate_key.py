@@ -12,6 +12,7 @@ TPM/RPM (`tpm_limit` / `rpm_limit`) bu üründe gönderilmez.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 TEAM_LIST_PATH = "/team/list"
@@ -280,18 +281,199 @@ async def generate_litellm_virtual_key(
     return plaintext, provider_id
 
 
+def parse_key_info_payload(payload: object) -> dict[str, Any]:
+    """`GET /key/info` hem düz dict hem `{info: {...}}` dönebilir."""
+    if not isinstance(payload, dict):
+        return {}
+    info = payload.get("info")
+    if isinstance(info, dict):
+        return info
+    return payload
+
+
+def _models_from_info(raw: object) -> list[str]:
+    if isinstance(raw, (list, tuple)):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+@dataclass
+class LiteLLMKeyInfo:
+    key_alias: str
+    team_id: str
+    models: list[str]
+    max_parallel_requests: int | None
+    blocked: bool
+
+
+def key_info_from_payload(payload: object) -> LiteLLMKeyInfo:
+    info = parse_key_info_payload(payload)
+    parallel_raw = info.get("max_parallel_requests")
+    parallel: int | None
+    try:
+        parallel = int(parallel_raw) if parallel_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        parallel = None
+    return LiteLLMKeyInfo(
+        key_alias=str(info.get("key_alias") or info.get("key_name") or "").strip(),
+        team_id=str(info.get("team_id") or info.get("team_alias") or "").strip(),
+        models=_models_from_info(info.get("models")),
+        max_parallel_requests=parallel,
+        blocked=bool(info.get("blocked")),
+    )
+
+
+async def fetch_key_info(
+    *,
+    api_key: str,
+    environment: str | None,
+) -> LiteLLMKeyInfo | None:
+    """`GET /key/info?key=`. 404 → None."""
+    import httpx
+
+    from backend.src.core.litellm.target import resolve_litellm_http
+
+    token = (api_key or "").strip()
+    if not token:
+        return None
+    base, credential = resolve_litellm_http(environment, kind="litellm")
+    if not base or not credential:
+        raise LiteLLMKeyError("LiteLLM base URL veya master key yok", retryable=False)
+    url = f"{base.rstrip('/')}/key/info"
+    try:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+            response = await client.get(
+                url,
+                params={"key": token},
+                headers={"Authorization": f"Bearer {credential}"},
+            )
+    except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
+        raise LiteLLMKeyError(f"LiteLLM unreachable: {exc}", retryable=True) from exc
+    if response.status_code == 404:
+        return None
+    snippet = (response.text or "")[:500]
+    if response.status_code in {429, 502, 503, 504}:
+        raise LiteLLMKeyError(f"LiteLLM http {response.status_code}: {snippet}", retryable=True)
+    if response.status_code >= 400:
+        raise LiteLLMKeyError(f"LiteLLM http {response.status_code}: {snippet}", retryable=False)
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise LiteLLMKeyError("LiteLLM non-json response", retryable=True) from exc
+    return key_info_from_payload(payload)
+
+
+def build_key_update_body(
+    *,
+    api_key: str,
+    team_id: str | None = None,
+    max_parallel_requests: int | None = None,
+    models: list[str] | None = None,
+    blocked: bool | None = None,
+) -> dict[str, object]:
+    """`POST /key/update` — yalnız set edilen alanlar."""
+    body: dict[str, object] = {"key": api_key.strip()}
+    if team_id and team_id.strip():
+        body["team_id"] = team_id.strip()
+    if max_parallel_requests is not None:
+        body["max_parallel_requests"] = int(max_parallel_requests)
+    if models is not None:
+        body["models"] = route_models_for_litellm(list(models))
+    if blocked is True:
+        body["blocked"] = True
+    return body
+
+
+async def update_litellm_virtual_key(
+    *,
+    api_key: str,
+    environment: str | None,
+    team_id: str | None = None,
+    max_parallel_requests: int | None = None,
+    models: list[str] | None = None,
+    blocked: bool | None = None,
+) -> dict[str, Any]:
+    """Canlı ``POST /key/update``."""
+    import httpx
+
+    from backend.src.core.litellm.target import resolve_litellm_http
+
+    token = (api_key or "").strip()
+    if not token:
+        raise LiteLLMKeyError("api_key boş", retryable=False)
+    base, credential = resolve_litellm_http(environment, kind="litellm")
+    if not base or not credential:
+        raise LiteLLMKeyError("LiteLLM base URL veya master key yok", retryable=False)
+    url = f"{base.rstrip('/')}/key/update"
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        resolved_team = (team_id or "").strip()
+        if resolved_team:
+            list_url = f"{base.rstrip('/')}{TEAM_LIST_PATH}"
+            try:
+                listed = await client.get(
+                    list_url,
+                    headers={"Authorization": f"Bearer {credential}"},
+                )
+            except (httpx.ConnectError, httpx.TimeoutException, OSError):
+                listed = None
+            if listed is not None and listed.status_code < 400:
+                try:
+                    matched = match_team_id(parse_team_list(listed.json()), resolved_team)
+                except ValueError:
+                    matched = None
+                if matched:
+                    resolved_team = matched
+        body = build_key_update_body(
+            api_key=token,
+            team_id=resolved_team or None,
+            max_parallel_requests=max_parallel_requests,
+            models=models,
+            blocked=blocked,
+        )
+        if set(body.keys()) == {"key"}:
+            raise LiteLLMKeyError("güncellenecek alan yok", retryable=False)
+        try:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {credential}"},
+                json=body,
+            )
+        except (httpx.ConnectError, httpx.TimeoutException, OSError) as exc:
+            raise LiteLLMKeyError(f"LiteLLM unreachable: {exc}", retryable=True) from exc
+        snippet = (response.text or "")[:500]
+        if response.status_code == 404:
+            raise LiteLLMKeyError("key not found", retryable=False)
+        if response.status_code in {429, 502, 503, 504}:
+            raise LiteLLMKeyError(f"LiteLLM http {response.status_code}: {snippet}", retryable=True)
+        if response.status_code >= 400:
+            raise LiteLLMKeyError(f"LiteLLM http {response.status_code}: {snippet}", retryable=False)
+        try:
+            return response.json() if response.content else {}
+        except ValueError:
+            return {}
+
+
 __all__ = [
     "LITELLM_MODEL_ROUTES",
     "MCP_NO_LLM_MODELS",
     "TEAM_LIST_PATH",
     "LiteLLMKeyError",
+    "LiteLLMKeyInfo",
     "build_key_generate_body",
+    "build_key_update_body",
     "build_mcp_key_generate_body",
+    "fetch_key_info",
     "fetch_litellm_teams",
     "generate_litellm_virtual_key",
+    "key_info_from_payload",
     "match_team_id",
     "mcp_key_generate_path",
+    "parse_key_info_payload",
     "parse_team_list",
     "route_models_for_litellm",
     "teams_for_ui",
+    "update_litellm_virtual_key",
 ]

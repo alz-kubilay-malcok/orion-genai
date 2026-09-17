@@ -3,6 +3,8 @@
 Worker'ın çağırdığı yüzey:
 
 * ``POST /key/generate``
+* ``GET  /key/info``
+* ``POST /key/update``
 * ``GET  /team/list``
 * ``POST /mcp/keys/create``
 * ``PUT  /mcp/servers/upsert``
@@ -80,6 +82,15 @@ class KeyGenerateRequest(BaseModel):
     key_type: str = "llm_api"
     metadata: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
+
+
+class KeyUpdateRequest(BaseModel):
+    key: str = Field(min_length=1)
+    team_id: str | None = None
+    max_parallel_requests: int | None = None
+    models: list[str] | None = None
+    blocked: bool | None = None
+    key_alias: str | None = None
 
 
 class MCPKeyCreateRequest(BaseModel):
@@ -188,6 +199,7 @@ def create_app() -> FastAPI:
                 "tags": payload.tags,
                 "key": plaintext,
                 "token_id": token_id,
+                "blocked": False,
                 "created_at": _utc_now_iso(),
             }
             state["llm_keys"][payload.key_alias] = record
@@ -221,14 +233,62 @@ def create_app() -> FastAPI:
         return {"teams": teams}
 
     @application.get("/key/info", dependencies=[Depends(_enforce_auth)])
-    async def key_info(key_alias: str) -> dict[str, Any]:
+    async def key_info(
+        key: str | None = None,
+        key_alias: str | None = None,
+    ) -> dict[str, Any]:
         with _STATE_RLOCK:
             state = _load_state()
-            record = state["llm_keys"].get(key_alias)
+            records = list(state.get("llm_keys", {}).values())
+        record = None
+        needle = (key or "").strip()
+        alias = (key_alias or "").strip()
+        if needle:
+            for item in records:
+                if str(item.get("key") or "") == needle:
+                    record = item
+                    break
+        elif alias:
+            record = state.get("llm_keys", {}).get(alias)
+        else:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="key or key_alias required")
         if not record:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="unknown key_alias")
-        # Never echo the actual bearer in mock /key/info responses.
-        return {k: v for k, v in record.items() if k != "key"}
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="unknown key")
+        info = {k: v for k, v in record.items() if k != "key"}
+        return {"info": info}
+
+    @application.post("/key/update", dependencies=[Depends(_enforce_auth)])
+    async def key_update(payload: KeyUpdateRequest) -> dict[str, Any]:
+        with _STATE_RLOCK:
+            state = _load_state()
+            found_alias = None
+            record = None
+            for alias, item in state.get("llm_keys", {}).items():
+                if str(item.get("key") or "") == payload.key:
+                    found_alias = alias
+                    record = item
+                    break
+            if record is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="unknown key")
+            if payload.team_id is not None:
+                record["team_id"] = payload.team_id
+            if payload.max_parallel_requests is not None:
+                record["max_parallel_requests"] = payload.max_parallel_requests
+            if payload.models is not None:
+                record["models"] = payload.models
+            if payload.blocked is True:
+                record["blocked"] = True
+            if payload.key_alias:
+                record["key_alias"] = payload.key_alias
+            state["llm_keys"][found_alias] = record
+            _record_event(
+                state,
+                "key.update",
+                key_alias=record.get("key_alias"),
+                token_id=record.get("token_id"),
+            )
+            _save_state(state)
+        return {"info": {k: v for k, v in record.items() if k != "key"}}
 
     @application.post("/mcp/keys/create", dependencies=[Depends(_enforce_auth)])
     async def mcp_keys_create(payload: MCPKeyCreateRequest) -> dict[str, Any]:

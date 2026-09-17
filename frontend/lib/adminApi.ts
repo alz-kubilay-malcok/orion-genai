@@ -399,6 +399,9 @@ const BATCH_ERROR_LABELS: Record<string, string> = {
   LITELLM_NOT_CONFIGURED: "LiteLLM adresi veya master key yok",
   INVALID_EXCEL: "Excel okunamadı",
   INVALID_MAX_PARALLEL: "Max parallel request en az 1 olmalı",
+  CSV_REQUIRED: "Yalnız .csv dosyası kabul edilir",
+  INVALID_CSV: "CSV okunamadı",
+  NOTHING_TO_UPDATE: "Güncellenecek alan yok (takım, max parallel, model veya blokla)",
 };
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -441,4 +444,74 @@ export async function submitBatchKeys(params: {
     throw new Error(detail || BATCH_ERROR_LABELS[code] || "Batch key üretilemedi");
   }
   triggerDownload(await res.blob(), "orion-batch-keys.csv");
+}
+
+export const previewKeyRowSchema = z.object({
+  row: z.number(),
+  email: z.string(),
+  name: z.string(),
+  api_key: z.string(),
+  found: z.boolean(),
+  key_alias: z.string(),
+  team: z.string(),
+  models: z.array(z.string()),
+  max_parallel_requests: z.number().nullable(),
+  blocked: z.boolean(),
+  error: z.string(),
+});
+export type PreviewKeyRow = z.infer<typeof previewKeyRowSchema>;
+
+export const previewKeysResultSchema = z.object({
+  environment: z.string(),
+  csv_rows: z.number(),
+  with_api_key: z.number(),
+  found: z.number(),
+  missing: z.number(),
+  rows: z.array(previewKeyRowSchema),
+});
+export type PreviewKeysResult = z.infer<typeof previewKeysResultSchema>;
+
+export async function previewBatchKeys(params: {
+  file: File;
+  environment?: string;
+}): Promise<PreviewKeysResult> {
+  const body = new FormData();
+  body.append("file", params.file);
+  if (params.environment) body.append("environment", params.environment);
+  const res = await adminFetch("/admin/batch-keys/preview", { method: "POST", body });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    const code = typeof json.error_code === "string" ? json.error_code : "";
+    const detail = typeof json.detail === "string" ? json.detail : "";
+    throw new Error(detail || BATCH_ERROR_LABELS[code] || "Önizleme başarısız");
+  }
+  return previewKeysResultSchema.parse(await res.json());
+}
+
+export async function updateBatchKeys(params: {
+  environment: string;
+  team?: string;
+  maxParallelRequests?: number | null;
+  models?: string[];
+  blocked?: boolean;
+  keys: { api_key: string; email: string; key_alias: string }[];
+}): Promise<void> {
+  const res = await adminFetch("/admin/batch-keys/update", {
+    method: "POST",
+    body: JSON.stringify({
+      environment: params.environment,
+      team: params.team || null,
+      max_parallel_requests: params.maxParallelRequests ?? null,
+      models: params.models?.length ? params.models : null,
+      blocked: params.blocked ? true : null,
+      keys: params.keys,
+    }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    const code = typeof json.error_code === "string" ? json.error_code : "";
+    const detail = typeof json.detail === "string" ? json.detail : "";
+    throw new Error(detail || BATCH_ERROR_LABELS[code] || "Güncelleme başarısız");
+  }
+  triggerDownload(await res.blob(), "orion-batch-keys-update.csv");
 }

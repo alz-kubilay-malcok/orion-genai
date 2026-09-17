@@ -277,3 +277,180 @@ def test_batch_template_download(monkeypatch):
     response = client.get("/admin/batch-keys/template")
     assert response.status_code == 200
     assert "spreadsheetml" in response.headers["content-type"]
+
+
+def test_parse_output_csv_requires_api_key():
+    from backend.src.core.batch_keys.csv_io import parse_output_csv
+
+    with pytest.raises(BatchExcelError, match="api_key"):
+        parse_output_csv(b"email,name\nali@allianz.com.tr,Ali\n")
+
+
+def test_parse_output_csv_reads_key_and_email():
+    from backend.src.core.batch_keys.csv_io import parse_output_csv
+
+    rows = parse_output_csv(
+        "email,name,key_alias,api_key\n"
+        "ali@allianz.com.tr,Ali,ALZ-A,sk-aaa\n".encode("utf-8-sig")
+    )
+    assert rows[0].email == "ali@allianz.com.tr"
+    assert rows[0].api_key == "sk-aaa"
+    assert rows[0].key_alias == "ALZ-A"
+
+
+def test_preview_keys_counts_found_and_missing():
+    from backend.src.core.batch_keys.csv_io import CsvKeyRow
+    from backend.src.core.batch_keys.update import preview_keys
+    from backend.src.core.litellm.generate_key import LiteLLMKeyInfo
+
+    rows = [
+        CsvKeyRow(2, "ali@allianz.com.tr", "Ali", "ALZ-A", "sk-aaa"),
+        CsvKeyRow(3, "ayse@allianz.com.tr", "Ayse", "ALZ-B", "sk-bbb"),
+        CsvKeyRow(4, "bos@allianz.com.tr", "", "", ""),
+    ]
+
+    async def fetch_info(*, api_key, environment):
+        if api_key == "sk-aaa":
+            return LiteLLMKeyInfo("ALZ-A", "GENAI", ["allianz-text"], 5, False)
+        return None
+
+    result = asyncio.run(preview_keys(rows, environment="DEV", fetch_info=fetch_info))
+    assert result.csv_rows == 3
+    assert result.with_api_key == 2
+    assert result.found == 1
+    assert result.missing == 2
+    assert result.rows[0].found is True
+    assert result.rows[0].team == "GENAI"
+
+
+def test_update_keys_applies_form_fields():
+    from backend.src.core.batch_keys.update import PreviewRow, update_keys
+
+    seen: list[dict] = []
+
+    async def apply(**kwargs):
+        seen.append(kwargs)
+        return {}
+
+    rows = [
+        PreviewRow(2, "ali@allianz.com.tr", "Ali", "sk-aaa", True, "ALZ-A"),
+        PreviewRow(3, "ayse@allianz.com.tr", "Ayse", "sk-bbb", False, "ALZ-B", error="yok"),
+    ]
+    results = asyncio.run(
+        update_keys(
+            rows,
+            environment="DEV",
+            team="GENAI",
+            max_parallel_requests=8,
+            models=["allianz-text"],
+            blocked=True,
+            update_key=apply,
+        )
+    )
+    assert results[0].status == "updated"
+    assert results[1].status == "skipped"
+    assert seen[0]["team_id"] == "GENAI"
+    assert seen[0]["max_parallel_requests"] == 8
+    assert seen[0]["blocked"] is True
+
+
+def test_preview_endpoint(monkeypatch):
+    client = _client(monkeypatch)
+
+    async def fake_preview(rows, **kwargs):
+        from backend.src.core.batch_keys.update import PreviewResult, PreviewRow
+
+        assert kwargs["environment"] == "DEV"
+        return PreviewResult(
+            csv_rows=1,
+            with_api_key=1,
+            found=1,
+            missing=0,
+            rows=[
+                PreviewRow(
+                    row=2,
+                    email=rows[0].email,
+                    name=rows[0].name,
+                    api_key=rows[0].api_key,
+                    found=True,
+                    key_alias="ALZ-A",
+                    team="GENAI",
+                    models=["allianz-text"],
+                    max_parallel_requests=5,
+                )
+            ],
+        )
+
+    monkeypatch.setattr("backend.src.api.routes.batch_keys.preview_keys", fake_preview)
+    response = client.post(
+        "/admin/batch-keys/preview",
+        data={"environment": "DEV"},
+        files={"file": ("out.csv", b"email,api_key\nali@allianz.com.tr,sk-aaa\n", "text/csv")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["found"] == 1
+    assert body["rows"][0]["email"] == "ali@allianz.com.tr"
+
+
+def test_update_endpoint(monkeypatch):
+    client = _client(monkeypatch)
+
+    async def fake_update(rows, **kwargs):
+        from backend.src.core.batch_keys.csv_io import MappingRow
+
+        assert kwargs["team"] == "GENAI"
+        assert kwargs["max_parallel_requests"] == 8
+        assert kwargs["models"] == ["allianz-text"]
+        assert kwargs["blocked"] is True
+        return [MappingRow(email=rows[0].email, key_alias=rows[0].key_alias, status="updated")]
+
+    monkeypatch.setattr("backend.src.api.routes.batch_keys.update_keys", fake_update)
+    response = client.post(
+        "/admin/batch-keys/update",
+        json={
+            "environment": "DEV",
+            "team": "GENAI",
+            "max_parallel_requests": 8,
+            "models": ["allianz-text"],
+            "blocked": True,
+            "keys": [
+                {"api_key": "sk-aaa", "email": "ali@allianz.com.tr", "key_alias": "ALZ-A"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert "text/csv" in response.headers["content-type"]
+    text = response.content.decode("utf-8-sig")
+    assert "updated" in text
+    assert "ali@allianz.com.tr" in text
+
+
+def test_update_endpoint_requires_a_field(monkeypatch):
+    client = _client(monkeypatch)
+    response = client.post(
+        "/admin/batch-keys/update",
+        json={
+            "environment": "DEV",
+            "keys": [{"api_key": "sk-aaa", "email": "ali@allianz.com.tr"}],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "NOTHING_TO_UPDATE"
+
+
+def test_preview_endpoint_rejects_non_csv(monkeypatch):
+    client = _client(monkeypatch)
+    response = client.post(
+        "/admin/batch-keys/preview",
+        data={"environment": "DEV"},
+        files={
+            "file": (
+                "keys.xlsx",
+                b"not-csv",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "CSV_REQUIRED"
