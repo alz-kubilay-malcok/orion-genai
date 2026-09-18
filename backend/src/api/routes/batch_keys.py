@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+import re
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -13,14 +14,20 @@ from backend.src.api.auth.dependencies import get_current_superuser
 from backend.src.core.batch_keys import (
     BatchExcelError,
     PreviewRow,
-    build_result_csv,
+    build_export_csv,
+    build_export_xlsx,
     build_template_xlsx,
-    build_update_result_csv,
+    parse_batch_csv,
     parse_batch_workbook,
-    parse_output_csv,
+    parse_output_file,
     preview_keys,
     process_batch,
     update_keys,
+)
+from backend.src.core.litellm.generate_key import (
+    LiteLLMKeyError,
+    create_litellm_team,
+    fetch_litellm_teams,
 )
 from backend.src.core.litellm.target import resolve_litellm_http
 from backend.src.data.db.models import User
@@ -61,6 +68,40 @@ async def download_batch_template(
     )
 
 
+@router.get("/litellm-teams")
+async def list_litellm_teams(
+    _user: Annotated[User, Depends(get_current_superuser)],
+    environment: str = "DEV",
+) -> JSONResponse:
+    """Batch ekranı için gerçek LiteLLM team listesi (dropdown)."""
+    env = (environment or "DEV").strip().upper() or "DEV"
+    teams = await fetch_litellm_teams(env)
+    return JSONResponse(content={"environment": env, "teams": teams})
+
+
+class CreateTeamBody(BaseModel):
+    environment: str = "DEV"
+    team_alias: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/litellm-teams")
+async def create_new_litellm_team(
+    _user: Annotated[User, Depends(get_current_superuser)],
+    body: CreateTeamBody,
+) -> JSONResponse:
+    """LiteLLM'de gerçek bir team oluşturur (idempotent — var olan alias reuse edilir)."""
+    env = (body.environment or "DEV").strip().upper() or "DEV"
+    try:
+        team = await create_litellm_team(environment=env, team_alias=body.team_alias)
+    except LiteLLMKeyError as exc:
+        status_code = 503 if exc.retryable else 422
+        return JSONResponse(
+            status_code=status_code,
+            content={"error_code": "LITELLM_TEAM_CREATE_FAILED", "detail": str(exc)},
+        )
+    return JSONResponse(content=team)
+
+
 @router.post("/batch-keys")
 async def create_batch_keys(
     _user: Annotated[User, Depends(get_current_superuser)],
@@ -70,9 +111,9 @@ async def create_batch_keys(
     environment: Annotated[str, Form()] = "DEV",
     max_parallel_requests: Annotated[str, Form()] = "",
 ) -> Response:
-    """Excel satırları için LiteLLM virtual key üretir; CSV döner (`api_key` kolonu).
+    """Excel/CSV satırları için LiteLLM virtual key üretir; JSON döner (satır+``api_key``).
 
-    Form: ``file`` (.xlsx), ``model_name``, ``send_mail`` (true/false),
+    Form: ``file`` (.xlsx veya .csv), ``model_name``, ``send_mail`` (true/false),
     ``environment`` (satırda yoksa varsayılan, default DEV),
     ``max_parallel_requests`` (tüm satırlara, boşsa LiteLLM'e gitmez).
     """
@@ -89,8 +130,10 @@ async def create_batch_keys(
         )
 
     filename = (file.filename or "").lower()
-    if not filename.endswith(".xlsx"):
-        return JSONResponse(status_code=422, content={"error_code": "XLSX_REQUIRED"})
+    is_xlsx = filename.endswith(".xlsx")
+    is_csv = filename.endswith(".csv")
+    if not is_xlsx and not is_csv:
+        return JSONResponse(status_code=422, content={"error_code": "XLSX_OR_CSV_REQUIRED"})
 
     data = await file.read()
     if not data:
@@ -105,10 +148,9 @@ async def create_batch_keys(
             content={"error_code": "LITELLM_NOT_CONFIGURED"},
         )
 
+    parse = parse_batch_workbook if is_xlsx else parse_batch_csv
     try:
-        sheet = parse_batch_workbook(
-            data, model_name=model, default_environment=default_env,
-        )
+        sheet = parse(data, model_name=model, default_environment=default_env)
     except BatchExcelError as exc:
         return JSONResponse(
             status_code=422,
@@ -124,21 +166,28 @@ async def create_batch_keys(
         model_name=model,
         send_mail=mail,
         max_parallel_requests=parallel,
+        auto_create_team=True,
         metadata={"source": "admin_batch_keys", "actor": _user.username},
     )
-    csv_bytes = build_result_csv(
-        sheet.headers,
-        sheet.values,
-        [item.api_key for item in results],
+    succeeded = sum(1 for item in results if item.ok)
+    failed = len(results) - succeeded
+    logger.info(
+        "batch-keys done rows=%s succeeded=%s failed=%s by=%s",
+        len(results), succeeded, failed, _user.username,
     )
-    return Response(
-        content=csv_bytes,
-        media_type="text/csv; charset=utf-8",
+    return JSONResponse(
+        content={
+            "environment": default_env,
+            "model_name": model,
+            "total": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+            "rows": [item.as_dict() for item in results],
+        },
         headers={
-            "Content-Disposition": 'attachment; filename="orion-batch-keys.csv"',
             "X-Batch-Total": str(len(results)),
-            "X-Batch-Succeeded": str(sum(1 for item in results if item.ok)),
-            "X-Batch-Failed": str(sum(1 for item in results if not item.ok)),
+            "X-Batch-Succeeded": str(succeeded),
+            "X-Batch-Failed": str(failed),
         },
     )
 
@@ -147,6 +196,9 @@ class UpdateKeyItem(BaseModel):
     api_key: str = Field(min_length=1)
     email: str = ""
     key_alias: str = ""
+    # Preview'da görülen mevcut (LiteLLM'deki ham) team değeri — yalnız
+    # `resolve_team_per_row=True` iken kullanılır.
+    team: str = ""
 
 
 class UpdateBatchBody(BaseModel):
@@ -155,6 +207,9 @@ class UpdateBatchBody(BaseModel):
     max_parallel_requests: int | None = Field(default=None, ge=1)
     models: list[str] | None = None
     blocked: bool | None = None
+    clear_metadata: bool | None = None
+    strip_row_count: bool | None = None
+    resolve_team_per_row: bool | None = None
     keys: list[UpdateKeyItem] = Field(min_length=1)
 
 
@@ -164,11 +219,11 @@ async def preview_batch_keys(
     file: Annotated[UploadFile, File(...)],
     environment: Annotated[str, Form()] = "DEV",
 ) -> JSONResponse:
-    """Create-output CSV: `api_key` ile LiteLLM `/key/info` bakılır."""
+    """Create-output CSV veya .xlsx: `api_key` ile LiteLLM `/key/info` bakılır."""
     default_env = (environment or "DEV").strip().upper() or "DEV"
     filename = (file.filename or "").lower()
-    if not filename.endswith(".csv"):
-        return JSONResponse(status_code=422, content={"error_code": "CSV_REQUIRED"})
+    if not filename.endswith(".csv") and not filename.endswith(".xlsx"):
+        return JSONResponse(status_code=422, content={"error_code": "CSV_OR_XLSX_REQUIRED"})
     data = await file.read()
     if not data:
         return JSONResponse(status_code=422, content={"error_code": "EMPTY_FILE"})
@@ -181,7 +236,7 @@ async def preview_batch_keys(
             content={"error_code": "LITELLM_NOT_CONFIGURED"},
         )
     try:
-        rows = parse_output_csv(data)
+        rows = parse_output_file(data, filename)
     except BatchExcelError as exc:
         return JSONResponse(
             status_code=422,
@@ -206,12 +261,23 @@ async def preview_batch_keys(
 async def update_batch_keys(
     _user: Annotated[User, Depends(get_current_superuser)],
     body: UpdateBatchBody,
-) -> Response:
-    """Preview'daki bulunan key'lere form alanlarını uygular; CSV döner."""
+) -> JSONResponse:
+    """Preview'daki bulunan (seçilen) key'lere form alanlarını uygular; JSON döner."""
     team = (body.team or "").strip() or None
     models = [part.strip() for part in (body.models or []) if part.strip()] or None
     blocked = True if body.blocked is True else None
-    if team is None and body.max_parallel_requests is None and models is None and blocked is None:
+    clear_metadata = body.clear_metadata is True
+    strip_row_count = body.strip_row_count is True
+    resolve_team_per_row = body.resolve_team_per_row is True
+    if (
+        team is None
+        and body.max_parallel_requests is None
+        and models is None
+        and blocked is None
+        and not clear_metadata
+        and not strip_row_count
+        and not resolve_team_per_row
+    ):
         return JSONResponse(status_code=422, content={"error_code": "NOTHING_TO_UPDATE"})
     default_env = (body.environment or "DEV").strip().upper() or "DEV"
     base, credential = resolve_litellm_http(default_env, kind="litellm")
@@ -228,31 +294,100 @@ async def update_batch_keys(
             api_key=item.api_key,
             found=True,
             key_alias=item.key_alias,
+            team=item.team,
         )
         for index, item in enumerate(body.keys, start=1)
     ]
     logger.info(
-        "batch-keys update n=%s team=%s parallel=%s models=%s blocked=%s by=%s",
-        len(preview_rows), team, body.max_parallel_requests, models, blocked, _user.username,
+        "batch-keys update n=%s team=%s parallel=%s models=%s blocked=%s clear_metadata=%s "
+        "strip_row_count=%s resolve_team_per_row=%s by=%s",
+        len(preview_rows), team, body.max_parallel_requests, models, blocked,
+        clear_metadata, strip_row_count, resolve_team_per_row, _user.username,
     )
-    results = await update_keys(
-        preview_rows,
-        environment=default_env,
-        team=team,
-        max_parallel_requests=body.max_parallel_requests,
-        models=models,
-        blocked=blocked,
-    )
-    csv_bytes = build_update_result_csv(results)
+    try:
+        results = await update_keys(
+            preview_rows,
+            environment=default_env,
+            team=team,
+            max_parallel_requests=body.max_parallel_requests,
+            models=models,
+            blocked=blocked,
+            clear_metadata=clear_metadata,
+            strip_row_suffix=strip_row_count,
+            resolve_team_per_row=resolve_team_per_row,
+        )
+    except LiteLLMKeyError as exc:
+        status_code = 503 if exc.retryable else 422
+        return JSONResponse(
+            status_code=status_code,
+            content={"error_code": "LITELLM_TEAM_RESOLVE_FAILED", "detail": str(exc)},
+        )
     succeeded = sum(1 for item in results if item.status == "updated")
     failed = sum(1 for item in results if item.status == "error")
-    return Response(
-        content=csv_bytes,
-        media_type="text/csv; charset=utf-8",
+    logger.info(
+        "batch-keys update done rows=%s succeeded=%s failed=%s by=%s",
+        len(results), succeeded, failed, _user.username,
+    )
+    return JSONResponse(
+        content={
+            "environment": default_env,
+            "total": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+            "rows": [
+                {
+                    "email": item.email,
+                    "key_alias": item.key_alias,
+                    "team": item.team,
+                    "status": item.status,
+                    "error": item.error,
+                }
+                for item in results
+            ],
+        },
         headers={
-            "Content-Disposition": 'attachment; filename="orion-batch-keys-update.csv"',
             "X-Batch-Total": str(len(results)),
             "X-Batch-Succeeded": str(succeeded),
             "X-Batch-Failed": str(failed),
         },
+    )
+
+
+class ExportRowItem(BaseModel):
+    email: str = ""
+    name: str = ""
+    key_alias: str = ""
+    team: str = ""
+    environment: str = ""
+    api_key: str = ""
+    status: str = ""
+    error: str = ""
+
+
+class ExportBatchBody(BaseModel):
+    format: Literal["csv", "xlsx"] = "csv"
+    filename: str = "orion-batch-keys"
+    rows: list[ExportRowItem] = Field(min_length=1)
+
+
+@router.post("/batch-keys/export")
+async def export_batch_keys(
+    _user: Annotated[User, Depends(get_current_superuser)],
+    body: ExportBatchBody,
+) -> Response:
+    """Ekranda seçilen (checkbox'lı) satırları CSV veya Excel olarak indirir."""
+    rows = [item.model_dump() for item in body.rows]
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "-", body.filename.strip()) or "orion-batch-keys"
+    if body.format == "xlsx":
+        content = build_export_xlsx(rows)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"{safe_name}.xlsx"
+    else:
+        content = build_export_csv(rows)
+        media_type = "text/csv; charset=utf-8"
+        filename = f"{safe_name}.csv"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

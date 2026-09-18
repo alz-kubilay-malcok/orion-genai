@@ -6,7 +6,7 @@ import csv
 import re
 from dataclasses import dataclass
 from io import BytesIO, StringIO
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from backend.src.core.naming import build_litellm_key_alias
 
@@ -87,13 +87,44 @@ def _email_ok(value: str) -> bool:
 
 
 def _default_alias(*, team: str, email: str, row: int, environment: str, model_name: str) -> str:
+    """``ticket`` yalnız username — Excel satır numarası artık eklenmiyor.
+
+    Not: LiteLLM ``key_alias`` global olarak **unique** olmak zorunda
+    (``POST /key/generate`` aynı alias'ta 400 döner). Row numarası eskiden
+    bunu garantiliyordu; artık aynı email+team+environment+model ile iki kez
+    key üretilirse ilgili satır LiteLLM'in "already exists" hatasıyla döner
+    (diğer satırlar etkilenmez — ``process_batch`` satır bazlı hata yakalar).
+    Çakışırsa Excel'deki ``key_alias`` kolonuna elle benzersiz bir alias
+    girilebilir.
+    """
     local = email.split("@", 1)[0]
     return build_litellm_key_alias(
         department=team or "BATCH",
-        ticket=f"{local}-{row}",
+        ticket=local,
         environment=environment,
         purpose=model_name,
     )
+
+
+_ROW_SUFFIX_RE = re.compile(r"^([A-Z]+)(\d+)$")
+
+
+def strip_batch_row_suffix(alias: str) -> str:
+    """Eski batch alias'larındaki (``USERNAME<row>``) sayı ekini kaldırır.
+
+    Alias şeması ``ALZ-{TEAM}-{TICKET}-{ENV}-{PURPOSE...}``; yalnız 3.
+    segment (``TICKET`` — username+satır no) hedeflenir, diğer segmentler
+    (department/environment/purpose) dokunulmaz. Eşleşme yoksa (row eki
+    içermiyorsa veya batch formatında değilse) alias değişmeden döner.
+    """
+    parts = alias.split("-")
+    if len(parts) < 3:
+        return alias
+    match = _ROW_SUFFIX_RE.match(parts[2])
+    if not match:
+        return alias
+    parts[2] = match.group(1)
+    return "-".join(parts)
 
 
 def parse_batch_excel(
@@ -108,13 +139,75 @@ def parse_batch_excel(
     ).rows
 
 
+def _build_batch_sheet(
+    headers: list[str],
+    rows_iter: Any,
+    *,
+    model_name: str,
+    default_environment: str,
+    start_row: int = 2,
+) -> ParsedSheet:
+    """Excel ve CSV parser'ının paylaştığı satır → ``BatchRow`` mantığı."""
+    mapping: dict[int, str] = {}
+    for index, cell in enumerate(headers):
+        field = _HEADER_ALIASES.get(_norm_header(cell))
+        if field and field not in mapping.values():
+            mapping[index] = field
+    if "email" not in mapping.values():
+        raise BatchExcelError(
+            "email kolonu yok (email / eposta / talep_eden_eposta)"
+        )
+
+    rows: list[BatchRow] = []
+    values: list[list[str]] = []
+    for row_number, cells in enumerate(rows_iter, start=start_row):
+        if not any(cells):
+            continue
+        padded = list(cells[: len(headers)]) + [""] * max(0, len(headers) - len(cells))
+        parsed: dict[str, Any] = {
+            field: padded[i] if i < len(padded) else ""
+            for i, field in mapping.items()
+        }
+        email = parsed.get("email", "").strip()
+        if not email:
+            raise BatchExcelError(f"Satır {row_number}: email boş")
+        if not _email_ok(email):
+            raise BatchExcelError(f"Satır {row_number}: geçersiz email ({email})")
+        name = parsed.get("name", "") or email.split("@", 1)[0]
+        team = parsed.get("team", "")
+        environment = (parsed.get("environment") or default_environment or "DEV").upper()
+        alias = parsed.get("key_alias", "") or _default_alias(
+            team=team,
+            email=email,
+            row=row_number,
+            environment=environment,
+            model_name=model_name,
+        )
+        rows.append(
+            BatchRow(
+                row=row_number,
+                email=email,
+                name=name,
+                key_alias=alias,
+                team=team,
+                environment=environment,
+            )
+        )
+        values.append(padded)
+        if len(rows) > MAX_BATCH_ROWS:
+            raise BatchExcelError(f"En fazla {MAX_BATCH_ROWS} satır işlenir")
+    if not rows:
+        raise BatchExcelError("İşlenecek satır yok")
+    return ParsedSheet(rows=rows, headers=headers, values=values)
+
+
 def parse_batch_workbook(
     data: bytes,
     *,
     model_name: str,
     default_environment: str = "DEV",
 ) -> ParsedSheet:
-    """Orijinal başlık/değerlerle birlikte parse et (CSV çıktısı için)."""
+    """Orijinal başlık/değerlerle birlikte .xlsx parse et."""
     from openpyxl import load_workbook
 
     try:
@@ -134,60 +227,39 @@ def parse_batch_workbook(
             headers.pop()
         if not headers:
             raise BatchExcelError("Excel'de başlık satırı yok")
-        mapping: dict[int, str] = {}
-        for index, cell in enumerate(headers):
-            field = _HEADER_ALIASES.get(_norm_header(cell))
-            if field and field not in mapping.values():
-                mapping[index] = field
-        if "email" not in mapping.values():
-            raise BatchExcelError(
-                "Excel'de email kolonu yok (email / eposta / talep_eden_eposta)"
-            )
-
-        rows: list[BatchRow] = []
-        values: list[list[str]] = []
-        for excel_row, raw in enumerate(iterator, start=2):
-            cells = [_cell(v) for v in list(raw or ())]
-            if not any(cells):
-                continue
-            padded = cells[: len(headers)] + [""] * max(0, len(headers) - len(cells))
-            parsed: dict[str, Any] = {
-                field: padded[i] if i < len(padded) else ""
-                for i, field in mapping.items()
-            }
-            email = parsed.get("email", "").strip()
-            if not email:
-                raise BatchExcelError(f"Satır {excel_row}: email boş")
-            if not _email_ok(email):
-                raise BatchExcelError(f"Satır {excel_row}: geçersiz email ({email})")
-            name = parsed.get("name", "") or email.split("@", 1)[0]
-            team = parsed.get("team", "")
-            environment = (parsed.get("environment") or default_environment or "DEV").upper()
-            alias = parsed.get("key_alias", "") or _default_alias(
-                team=team,
-                email=email,
-                row=excel_row,
-                environment=environment,
-                model_name=model_name,
-            )
-            rows.append(
-                BatchRow(
-                    row=excel_row,
-                    email=email,
-                    name=name,
-                    key_alias=alias,
-                    team=team,
-                    environment=environment,
-                )
-            )
-            values.append(padded)
-            if len(rows) > MAX_BATCH_ROWS:
-                raise BatchExcelError(f"En fazla {MAX_BATCH_ROWS} satır işlenir")
-        if not rows:
-            raise BatchExcelError("Excel'de işlenecek satır yok")
-        return ParsedSheet(rows=rows, headers=headers, values=values)
+        cell_rows = ([_cell(v) for v in list(raw or ())] for raw in iterator)
+        return _build_batch_sheet(
+            headers, cell_rows, model_name=model_name, default_environment=default_environment,
+        )
     finally:
         workbook.close()
+
+
+def parse_batch_csv(
+    data: bytes,
+    *,
+    model_name: str,
+    default_environment: str = "DEV",
+) -> ParsedSheet:
+    """Create girdisi için .csv desteği; aynı kolon şeması (email,name,key_alias,team,environment)."""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise BatchExcelError("CSV UTF-8 olmalı") from exc
+    reader = csv.reader(StringIO(text))
+    try:
+        header_raw = next(reader)
+    except StopIteration as exc:
+        raise BatchExcelError("CSV boş") from exc
+    headers = [_cell(cell) for cell in header_raw]
+    while headers and not headers[-1]:
+        headers.pop()
+    if not headers:
+        raise BatchExcelError("CSV'de başlık satırı yok")
+    cell_rows = ([_cell(v) for v in row] for row in reader)
+    return _build_batch_sheet(
+        headers, cell_rows, model_name=model_name, default_environment=default_environment,
+    )
 
 
 def build_result_csv(
@@ -221,6 +293,35 @@ def build_result_csv(
     return buffer.getvalue().encode("utf-8-sig")
 
 
+EXPORT_COLUMNS = ("email", "name", "key_alias", "team", "environment", "api_key", "status", "error")
+
+
+def build_export_csv(rows: Sequence[Mapping[str, object]]) -> bytes:
+    """Ekrandaki (seçilen) satırları CSV'ye yazar — export butonu."""
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(EXPORT_COLUMNS)
+    for row in rows:
+        writer.writerow([_cell(row.get(col)) for col in EXPORT_COLUMNS])
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def build_export_xlsx(rows: Sequence[Mapping[str, object]]) -> bytes:
+    """Ekrandaki (seçilen) satırları .xlsx'e yazar — export butonu."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.title = "keys"
+    sheet.append(list(EXPORT_COLUMNS))
+    for row in rows:
+        sheet.append([_cell(row.get(col)) for col in EXPORT_COLUMNS])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 def build_template_xlsx() -> bytes:
     from openpyxl import Workbook
 
@@ -236,13 +337,18 @@ def build_template_xlsx() -> bytes:
 
 
 __all__ = [
+    "EXPORT_COLUMNS",
     "MAX_BATCH_ROWS",
     "TEMPLATE_HEADERS",
     "BatchExcelError",
     "BatchRow",
     "ParsedSheet",
+    "build_export_csv",
+    "build_export_xlsx",
     "build_result_csv",
     "build_template_xlsx",
+    "parse_batch_csv",
     "parse_batch_excel",
     "parse_batch_workbook",
+    "strip_batch_row_suffix",
 ]

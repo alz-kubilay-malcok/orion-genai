@@ -389,19 +389,23 @@ export async function deleteLdapMapping(id: string): Promise<void> {
   if (!res.ok) throw new Error("Mapping silinemedi");
 }
 
-// ---- Batch LiteLLM keys (Excel → CSV) --------------------------------
+// ---- Batch LiteLLM keys (Excel/CSV) -----------------------------------
 
 const BATCH_ERROR_LABELS: Record<string, string> = {
   MODEL_NAME_REQUIRED: "Model adı zorunlu",
+  XLSX_OR_CSV_REQUIRED: "Yalnız .xlsx veya .csv dosyası kabul edilir",
   XLSX_REQUIRED: "Yalnız .xlsx dosyası kabul edilir",
   EMPTY_FILE: "Dosya boş",
   FILE_TOO_LARGE: "Dosya 5 MB sınırını aşıyor",
   LITELLM_NOT_CONFIGURED: "LiteLLM adresi veya master key yok",
-  INVALID_EXCEL: "Excel okunamadı",
+  INVALID_EXCEL: "Dosya okunamadı",
   INVALID_MAX_PARALLEL: "Max parallel request en az 1 olmalı",
+  CSV_OR_XLSX_REQUIRED: "Yalnız .csv veya .xlsx dosyası kabul edilir",
   CSV_REQUIRED: "Yalnız .csv dosyası kabul edilir",
   INVALID_CSV: "CSV okunamadı",
   NOTHING_TO_UPDATE: "Güncellenecek alan yok (takım, max parallel, model veya blokla)",
+  LITELLM_TEAM_CREATE_FAILED: "LiteLLM'de team oluşturulamadı",
+  LITELLM_TEAM_RESOLVE_FAILED: "Takım LiteLLM'de bulunamadı/oluşturulamadı",
 };
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -421,13 +425,44 @@ export async function downloadBatchKeysTemplate(): Promise<void> {
   triggerDownload(await res.blob(), "orion-batch-keys.xlsx");
 }
 
+export const batchKeyRowSchema = z.object({
+  row: z.number(),
+  email: z.string(),
+  name: z.string(),
+  key_alias: z.string(),
+  team: z.string(),
+  environment: z.string(),
+  ok: z.boolean(),
+  api_key: z.string(),
+  mailed: z.boolean(),
+  error: z.string(),
+});
+export type BatchKeyRow = z.infer<typeof batchKeyRowSchema>;
+
+export const batchCreateResultSchema = z.object({
+  environment: z.string(),
+  model_name: z.string(),
+  total: z.number(),
+  succeeded: z.number(),
+  failed: z.number(),
+  rows: z.array(batchKeyRowSchema),
+});
+export type BatchCreateResult = z.infer<typeof batchCreateResultSchema>;
+
+async function batchErrorMessage(res: Response, fallback: string): Promise<string> {
+  const json = await res.json().catch(() => ({}));
+  const code = typeof json.error_code === "string" ? json.error_code : "";
+  const detail = typeof json.detail === "string" ? json.detail : "";
+  return detail || BATCH_ERROR_LABELS[code] || fallback;
+}
+
 export async function submitBatchKeys(params: {
   file: File;
   modelName: string;
   sendMail: boolean;
   environment?: string;
   maxParallelRequests?: string;
-}): Promise<void> {
+}): Promise<BatchCreateResult> {
   const body = new FormData();
   body.append("file", params.file);
   body.append("model_name", params.modelName);
@@ -438,12 +473,73 @@ export async function submitBatchKeys(params: {
   }
   const res = await adminFetch("/admin/batch-keys", { method: "POST", body });
   if (!res.ok) {
-    const json = await res.json().catch(() => ({}));
-    const code = typeof json.error_code === "string" ? json.error_code : "";
-    const detail = typeof json.detail === "string" ? json.detail : "";
-    throw new Error(detail || BATCH_ERROR_LABELS[code] || "Batch key üretilemedi");
+    throw new Error(await batchErrorMessage(res, "Batch key üretilemedi"));
   }
-  triggerDownload(await res.blob(), "orion-batch-keys.csv");
+  return batchCreateResultSchema.parse(await res.json());
+}
+
+// ---- LiteLLM teams (batch ekranı) --------------------------------------
+
+export const liteLLMTeamOptionSchema = z.object({
+  team_id: z.string(),
+  team_alias: z.string(),
+});
+export type LiteLLMTeamOptionDto = z.infer<typeof liteLLMTeamOptionSchema>;
+
+export async function fetchLiteLLMTeams(environment: string): Promise<LiteLLMTeamOptionDto[]> {
+  const res = await adminFetch(
+    `/admin/litellm-teams?environment=${encodeURIComponent(environment)}`,
+  );
+  if (!res.ok) throw new Error("Team listesi alınamadı");
+  const json = await res.json();
+  return liteLLMTeamOptionSchema.array().parse(json.teams ?? []);
+}
+
+export async function createLiteLLMTeam(
+  environment: string,
+  teamAlias: string,
+): Promise<LiteLLMTeamOptionDto> {
+  const res = await adminFetch("/admin/litellm-teams", {
+    method: "POST",
+    body: JSON.stringify({ environment, team_alias: teamAlias }),
+  });
+  if (!res.ok) {
+    throw new Error(await batchErrorMessage(res, "Team oluşturulamadı"));
+  }
+  return liteLLMTeamOptionSchema.parse(await res.json());
+}
+
+// ---- Export (checkbox'lı listeden CSV/Excel indir) ---------------------
+
+export async function exportBatchKeyRows(params: {
+  format: "csv" | "xlsx";
+  filename?: string;
+  rows: {
+    email?: string;
+    name?: string;
+    key_alias?: string;
+    team?: string;
+    environment?: string;
+    api_key?: string;
+    status?: string;
+    error?: string;
+  }[];
+}): Promise<void> {
+  const res = await adminFetch("/admin/batch-keys/export", {
+    method: "POST",
+    body: JSON.stringify({
+      format: params.format,
+      filename: params.filename || "orion-batch-keys",
+      rows: params.rows,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await batchErrorMessage(res, "Dışa aktarılamadı"));
+  }
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = match?.[1] || `orion-batch-keys.${params.format}`;
+  triggerDownload(await res.blob(), filename);
 }
 
 export const previewKeyRowSchema = z.object({
@@ -480,13 +576,28 @@ export async function previewBatchKeys(params: {
   if (params.environment) body.append("environment", params.environment);
   const res = await adminFetch("/admin/batch-keys/preview", { method: "POST", body });
   if (!res.ok) {
-    const json = await res.json().catch(() => ({}));
-    const code = typeof json.error_code === "string" ? json.error_code : "";
-    const detail = typeof json.detail === "string" ? json.detail : "";
-    throw new Error(detail || BATCH_ERROR_LABELS[code] || "Önizleme başarısız");
+    throw new Error(await batchErrorMessage(res, "Önizleme başarısız"));
   }
   return previewKeysResultSchema.parse(await res.json());
 }
+
+export const batchUpdateResultRowSchema = z.object({
+  email: z.string(),
+  key_alias: z.string(),
+  team: z.string().optional().default(""),
+  status: z.string(),
+  error: z.string(),
+});
+export type BatchUpdateResultRow = z.infer<typeof batchUpdateResultRowSchema>;
+
+export const batchUpdateResultSchema = z.object({
+  environment: z.string(),
+  total: z.number(),
+  succeeded: z.number(),
+  failed: z.number(),
+  rows: z.array(batchUpdateResultRowSchema),
+});
+export type BatchUpdateResult = z.infer<typeof batchUpdateResultSchema>;
 
 export async function updateBatchKeys(params: {
   environment: string;
@@ -494,8 +605,11 @@ export async function updateBatchKeys(params: {
   maxParallelRequests?: number | null;
   models?: string[];
   blocked?: boolean;
-  keys: { api_key: string; email: string; key_alias: string }[];
-}): Promise<void> {
+  clearMetadata?: boolean;
+  stripRowCount?: boolean;
+  resolveTeamPerRow?: boolean;
+  keys: { api_key: string; email: string; key_alias: string; team?: string }[];
+}): Promise<BatchUpdateResult> {
   const res = await adminFetch("/admin/batch-keys/update", {
     method: "POST",
     body: JSON.stringify({
@@ -504,14 +618,14 @@ export async function updateBatchKeys(params: {
       max_parallel_requests: params.maxParallelRequests ?? null,
       models: params.models?.length ? params.models : null,
       blocked: params.blocked ? true : null,
+      clear_metadata: params.clearMetadata ? true : null,
+      strip_row_count: params.stripRowCount ? true : null,
+      resolve_team_per_row: params.resolveTeamPerRow ? true : null,
       keys: params.keys,
     }),
   });
   if (!res.ok) {
-    const json = await res.json().catch(() => ({}));
-    const code = typeof json.error_code === "string" ? json.error_code : "";
-    const detail = typeof json.detail === "string" ? json.detail : "";
-    throw new Error(detail || BATCH_ERROR_LABELS[code] || "Güncelleme başarısız");
+    throw new Error(await batchErrorMessage(res, "Güncelleme başarısız"));
   }
-  triggerDownload(await res.blob(), "orion-batch-keys-update.csv");
+  return batchUpdateResultSchema.parse(await res.json());
 }

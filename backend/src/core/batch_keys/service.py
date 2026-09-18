@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 GenerateKey = Callable[..., Awaitable[tuple[str, str]]]
 SendMail = Callable[..., bool]
+
+# SMTP relay'i (mailenable.allianz-tr.local) art arda onlarca mail ile
+# boğmamak için throttle: satır başına en fazla 1 mail/saniye. Batch 200
+# satıra kadar çıkabildiğinden (bkz. MAX_BATCH_ROWS) mailsiz akışta bu
+# limit devreye girmez, yalnızca ``send_mail=True`` iken uygulanır.
+MAIL_MIN_INTERVAL_SECONDS = 1.0
 
 
 @dataclass(slots=True)
@@ -85,9 +93,26 @@ async def process_batch(
     generate_key: GenerateKey | None = None,
     mailer: SendMail | None = None,
     metadata: Mapping[str, object] | None = None,
+    auto_create_team: bool = False,
 ) -> list[BatchRowResult]:
+    """Excel satırlarından key üretir.
+
+    ``auto_create_team=True`` ise Excel'deki ``team`` kolonu LiteLLM'de yoksa
+    otomatik oluşturulur (gerçek ``team_id`` ile); aksi halde eşleşmeyen
+    isim satırı hataya düşürür (bkz. ``generate_litellm_virtual_key``).
+
+    ``send_mail=True`` iken satır başı mailler ``MAIL_MIN_INTERVAL_SECONDS``
+    (1 saniye) ile throttle edilir — SMTP relay'i art arda onlarca mail ile
+    boğmamak için. Key üretimi (LiteLLM çağrısı) throttle'a dahil değil.
+    """
     generate = generate_key or generate_litellm_virtual_key
     results: list[BatchRowResult] = []
+    started_at = time.monotonic()
+    last_mail_at: float | None = None
+    logger.info(
+        "batch process start rows=%s model=%s send_mail=%s parallel=%s auto_create_team=%s",
+        len(rows), model_name, send_mail, max_parallel_requests, auto_create_team,
+    )
     for row in rows:
         try:
             plaintext, _provider_id = await generate(
@@ -97,6 +122,7 @@ async def process_batch(
                 max_parallel_requests=max_parallel_requests,
                 environment=row.environment,
                 metadata=dict(metadata or {}),
+                auto_create_team=auto_create_team,
             )
         except LiteLLMKeyError as exc:
             logger.warning(
@@ -135,6 +161,12 @@ async def process_batch(
         mailed = False
         error = ""
         if send_mail:
+            if last_mail_at is not None:
+                elapsed = time.monotonic() - last_mail_at
+                wait = MAIL_MIN_INTERVAL_SECONDS - elapsed
+                if wait > 0:
+                    logger.debug("batch mail throttle row=%s wait=%.2fs", row.row, wait)
+                    await asyncio.sleep(wait)
             try:
                 mailed = bool(
                     _send_result_mail(
@@ -146,10 +178,13 @@ async def process_batch(
                     )
                 )
                 if not mailed:
+                    logger.warning("batch mail not sent row=%s alias=%s", row.row, row.key_alias)
                     error = "mail gönderilemedi"
             except Exception as exc:
                 logger.exception("batch mail failed row=%s", row.row)
                 error = f"mail hata: {exc}"
+            finally:
+                last_mail_at = time.monotonic()
         results.append(
             BatchRowResult(
                 row=row.row,
@@ -168,6 +203,13 @@ async def process_batch(
             "batch key ok row=%s alias=%s mailed=%s",
             row.row, row.key_alias, mailed,
         )
+    succeeded = sum(1 for item in results if item.ok)
+    mailed_count = sum(1 for item in results if item.mailed)
+    duration = time.monotonic() - started_at
+    logger.info(
+        "batch process done rows=%s succeeded=%s failed=%s mailed=%s duration=%.2fs",
+        len(results), succeeded, len(results) - succeeded, mailed_count, duration,
+    )
     return results
 
 

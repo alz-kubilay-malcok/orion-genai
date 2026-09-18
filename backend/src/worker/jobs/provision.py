@@ -56,27 +56,27 @@ async def _resolve_litellm_team_id(
     credential: str,
     team_name: str,
 ) -> str:
-    """`GET /team/list` → alias/id eşleşmesi; yoksa adı `team_id` olarak geçir."""
-    from ...core.litellm.generate_key import TEAM_LIST_PATH, match_team_id, parse_team_list
+    """Team adı/alias → gerçek LiteLLM ``team_id``; yoksa ``/team/new`` ile oluşturur.
+
+    Eskiden eşleşme bulunamazsa ham ad ``team_id`` olarak LiteLLM'e
+    geçiriliyordu (var olmayan id → provider hata veriyordu). Artık
+    :func:`resolve_or_create_team_id` gerçek bir team oluşturup id'sini
+    kullanır; ``client`` parametresi geriye dönük uyumluluk için tutulur
+    (kullanılmıyor, kendi client'ını açar).
+    """
+    from ...core.litellm.generate_key import LiteLLMKeyError, resolve_or_create_team_id
 
     name = team_name.strip()
     if not name:
         return ""
-    url = f"{base.rstrip('/')}{TEAM_LIST_PATH}"
     try:
-        response = await client.get(  # type: ignore[union-attr]
-            url,
-            headers={"Authorization": f"Bearer {credential}"},
+        return await resolve_or_create_team_id(
+            base=base, credential=credential, name=name, auto_create=True,
         )
-    except Exception:
-        return name
-    if response.status_code >= 400:
-        return name
-    try:
-        payload = response.json()
-    except ValueError:
-        return name
-    return match_team_id(parse_team_list(payload), name) or name
+    except LiteLLMKeyError as exc:
+        if exc.retryable:
+            raise RetryHeld(f"litellm team resolve/create: {exc}") from exc
+        raise PermanentError(f"litellm team resolve/create: {exc}") from exc
 
 
 def _provider_base(kind: str, environment: str | None) -> tuple[str, str, str]:

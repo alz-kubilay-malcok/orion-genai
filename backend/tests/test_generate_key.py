@@ -1,3 +1,5 @@
+import pytest
+
 from backend.src.core.litellm.generate_key import (
     build_key_generate_body,
     build_mcp_key_generate_body,
@@ -78,6 +80,131 @@ def test_match_team_id_by_alias():
     assert match_team_id(teams, "genai") == "abc"
 
 
+def test_resolve_or_create_team_id_matches_existing(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from backend.src.core.litellm.generate_key import resolve_or_create_team_id
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, headers=None):
+            assert url.endswith("/team/list")
+            return httpx.Response(200, json={"teams": [{"team_id": "abc", "team_alias": "GENAI"}]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    team_id = asyncio.run(
+        resolve_or_create_team_id(base="http://litellm.test", credential="master", name="genai")
+    )
+    assert team_id == "abc"
+
+
+def test_resolve_or_create_team_id_raises_when_missing_and_no_auto_create(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from backend.src.core.litellm.generate_key import LiteLLMKeyError, resolve_or_create_team_id
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, headers=None):
+            return httpx.Response(200, json={"teams": []})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    with pytest.raises(LiteLLMKeyError):
+        asyncio.run(
+            resolve_or_create_team_id(
+                base="http://litellm.test", credential="master", name="YENI-TAKIM",
+            )
+        )
+
+
+def test_resolve_or_create_team_id_auto_creates(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from backend.src.core.litellm.generate_key import resolve_or_create_team_id
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, headers=None):
+            return httpx.Response(200, json={"teams": []})
+
+        async def post(self, url, headers=None, json=None):
+            assert url.endswith("/team/new")
+            assert json == {"team_alias": "YENI-TAKIM"}
+            return httpx.Response(200, json={"team_id": "new-id-123", "team_alias": "YENI-TAKIM"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    team_id = asyncio.run(
+        resolve_or_create_team_id(
+            base="http://litellm.test",
+            credential="master",
+            name="YENI-TAKIM",
+            auto_create=True,
+        )
+    )
+    assert team_id == "new-id-123"
+
+
+def test_create_litellm_team(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from backend.src.core.litellm.generate_key import create_litellm_team
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "http://litellm.test")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "master")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, headers=None):
+            return httpx.Response(200, json={"teams": []})
+
+        async def post(self, url, headers=None, json=None):
+            return httpx.Response(200, json={"team_id": "new-id-456"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    team = asyncio.run(create_litellm_team(environment="DEV", team_alias="HASAR"))
+    assert team == {"team_id": "new-id-456", "team_alias": "HASAR"}
+
+
 def test_generate_litellm_virtual_key(monkeypatch):
     import asyncio
 
@@ -148,6 +275,28 @@ def test_build_key_update_body_omits_empty():
     assert body == {"key": "sk-1", "team_id": "GENAI", "blocked": True}
     assert "max_parallel_requests" not in body
     assert "models" not in body
+    assert "metadata" not in body
+
+
+def test_build_key_update_body_clear_metadata():
+    from backend.src.core.litellm.generate_key import build_key_update_body
+
+    body = build_key_update_body(api_key="sk-1", clear_metadata=True)
+    assert body == {"key": "sk-1", "metadata": {}}
+
+
+def test_build_key_update_body_key_alias():
+    from backend.src.core.litellm.generate_key import build_key_update_body
+
+    body = build_key_update_body(api_key="sk-1", key_alias="ALZ-GENAI-ALIVELI-DEV-TEXT")
+    assert body == {"key": "sk-1", "key_alias": "ALZ-GENAI-ALIVELI-DEV-TEXT"}
+
+
+def test_build_key_update_body_key_alias_blank_is_omitted():
+    from backend.src.core.litellm.generate_key import build_key_update_body
+
+    body = build_key_update_body(api_key="sk-1", key_alias="   ")
+    assert "key_alias" not in body
 
 
 def test_fetch_key_info_404_is_none(monkeypatch):
@@ -223,3 +372,71 @@ def test_update_litellm_virtual_key(monkeypatch):
         )
     )
     assert payload["info"]["key_alias"] == "ALZ-A"
+
+
+def test_update_litellm_virtual_key_clears_metadata(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from backend.src.core.litellm.generate_key import update_litellm_virtual_key
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "http://litellm.test")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "master")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            assert url.endswith("/key/update")
+            assert json == {"key": "sk-aaa", "metadata": {}}
+            return httpx.Response(200, json={"info": {"metadata": {}}})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    payload = asyncio.run(
+        update_litellm_virtual_key(api_key="sk-aaa", environment="DEV", clear_metadata=True)
+    )
+    assert payload["info"]["metadata"] == {}
+
+
+def test_update_litellm_virtual_key_sets_key_alias(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from backend.src.core.litellm.generate_key import update_litellm_virtual_key
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "http://litellm.test")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "master")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            assert url.endswith("/key/update")
+            assert json == {"key": "sk-aaa", "key_alias": "ALZ-GENAI-ALIVELI-DEV-TEXT"}
+            return httpx.Response(200, json={"info": {"key_alias": "ALZ-GENAI-ALIVELI-DEV-TEXT"}})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    payload = asyncio.run(
+        update_litellm_virtual_key(
+            api_key="sk-aaa",
+            environment="DEV",
+            key_alias="ALZ-GENAI-ALIVELI-DEV-TEXT",
+        )
+    )
+    assert payload["info"]["key_alias"] == "ALZ-GENAI-ALIVELI-DEV-TEXT"
