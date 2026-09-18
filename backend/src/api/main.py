@@ -11,8 +11,11 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.src.api.routes import (
     admin,
@@ -83,6 +86,30 @@ def create_app() -> FastAPI:
         allow_credentials=True,
     )
     application.add_middleware(CorrelationIdMiddleware)
+
+    @application.exception_handler(Exception)
+    async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Son çare handler — HTTP/422'yi 500'e çevirmesin.
+
+        ``Exception`` handler Starlette'de HTTPException ve
+        RequestValidationError'ı da yakalar; onları yeniden yükseltmezsek
+        n8n tarafında her 4xx ``Internal Server Error`` görünür.
+        """
+        if isinstance(exc, (HTTPException, StarletteHTTPException, RequestValidationError)):
+            raise exc
+        correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get(
+            "X-Correlation-Id", ""
+        )
+        logger.exception(
+            "unhandled exception on %s %s",
+            request.method, request.url.path,
+            extra={"correlation_id": correlation_id},
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error_code": "INTERNAL_ERROR", "correlation_id": correlation_id},
+            headers={"X-Correlation-Id": correlation_id} if correlation_id else None,
+        )
 
     application.include_router(health.router)
     application.include_router(orion_webhook.router, prefix="/webhooks")

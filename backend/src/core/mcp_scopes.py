@@ -34,11 +34,18 @@ def _clean_tools(value: object) -> tuple[str, ...]:
     out: list[str] = []
     seen: set[str] = set()
     for item in value:
-        name = str(item).strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        out.append(name)
+        raw = str(item)
+        # Kaynak form (Jira/n8n) bazen birden fazla araç adını virgülle
+        # birleştirip tek string olarak gönderiyor (bkz. ITSM-90487:
+        # ["list_ndbx_components,get_ndbx_doc,get_ndbx_css,push_design_html"]).
+        # Her parçayı ayrı bir araç adı say — aksi halde tek "araç" gibi
+        # kaydedilip LiteLLM'de hiçbiri eşleşmiyor.
+        for part in raw.split(","):
+            name = part.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            out.append(name)
     return tuple(out)
 
 
@@ -70,15 +77,17 @@ def _scope_from_erisim(row: Mapping[str, Any]) -> McpScope:
         raise ValueError("erisimler[].mcp_sunucusu boş olamaz")
     all_tools = bool(row.get("tum_araclara_erisim"))
     tools = _clean_tools(row.get("araclar"))
-    if all_tools and tools:
-        raise ValueError(
-            f"{server}: tum_araclara_erisim=true iken araclar boş olmalı"
-        )
-    if not all_tools and not tools:
+    # `tum_araclara_erisim=true` her zaman önceliklidir. Kaynak form
+    # (Jira/n8n) checkbox işaretliyken de seçili araç listesini göndermeye
+    # devam edebiliyor (bkz. ITSM-90487) — bunu 422/500'e düşürmek yerine
+    # sessizce yoksay (flag zaten "hepsi" diyor).
+    if all_tools:
+        tools = ()
+    elif not tools:
         raise ValueError(
             f"{server}: tum_araclara_erisim=false iken en az bir araç gerekli"
         )
-    return McpScope(server=server, tools=() if all_tools else tools, all_tools=all_tools)
+    return McpScope(server=server, tools=tools, all_tools=all_tools)
 
 
 def normalize_scopes(
@@ -141,17 +150,16 @@ def normalize_scopes(
         folded = server.casefold()
         all_tools = global_all or all_map.get(folded, False)
         tools = tools_by_server.get(folded, ())
-        if all_tools and tools:
-            raise ValueError(
-                f"{server}: tum_araclara_erisim=true iken araclar boş olmalı"
-            )
-        if not all_tools and not tools:
+        # `tum_araclara_erisim=true` önceliklidir; kaynak form (Jira/n8n)
+        # checkbox işaretliyken de seçili araçları göndermeye devam edebiliyor
+        # (bkz. ITSM-90487) — hataya düşürmek yerine sessizce yoksay.
+        if all_tools:
+            tools = ()
+        elif not tools:
             raise ValueError(
                 f"{server}: tum_araclara_erisim=false iken en az bir araç gerekli"
             )
-        scopes.append(
-            McpScope(server=server, tools=() if all_tools else tools, all_tools=all_tools)
-        )
+        scopes.append(McpScope(server=server, tools=tools, all_tools=all_tools))
     extra = set(tools_by_server) - {s.casefold() for s in servers}
     if extra:
         raise ValueError(f"araclar içinde mcp_sunucusu olmayan sunucu: {sorted(extra)}")

@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from backend.src.core.naming import build_litellm_key_alias
 
-MAX_BATCH_ROWS = 200
+MAX_BATCH_ROWS = 1000
 TEMPLATE_HEADERS = ("email", "name", "key_alias", "team", "environment")
 
 _HEADER_ALIASES: dict[str, str] = {
