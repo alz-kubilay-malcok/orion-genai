@@ -225,6 +225,15 @@ async def _provision_credential(
         if not plaintext:
             raise PermanentError(f"{kind} response missing key")
         logger.info("%s provision: live http ok", kind, extra={"request_id": str(request_id)})
+        if kind == "litellm":
+            from ...core.copilot_roster import register_roster_member
+
+            await register_roster_member(
+                api_key=plaintext,
+                full_name=row.requester_name or "",
+                team_id=(row.department_name or ""),
+                email=row.requester_email or "",
+            )
     else:
         logger.info("%s provision: dry-run (no base/path/credential)", kind,
                     extra={"request_id": str(request_id)})

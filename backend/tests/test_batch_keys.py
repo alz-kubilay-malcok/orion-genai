@@ -43,7 +43,7 @@ def test_parse_excel_turkish_headers_and_defaults():
     assert rows[0].name == "Ali Veli"
     assert rows[0].team == "GENAI"
     assert rows[0].environment == "DEV"
-    assert rows[0].key_alias == "ALZ-GENAI-ALIVELI-DEV-ALLIANZ-TEXT"
+    assert rows[0].key_alias == "ALZ-GENAI-DEV-ALLIANZ-TEXT-OTHER"
 
 
 def test_parse_excel_rejects_missing_email_column():

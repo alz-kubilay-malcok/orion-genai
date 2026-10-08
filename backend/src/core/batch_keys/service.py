@@ -158,6 +158,15 @@ async def process_batch(
             )
             continue
 
+        from backend.src.core.copilot_roster import register_roster_member
+
+        await register_roster_member(
+            api_key=plaintext,
+            full_name=row.name,
+            team_id=row.team,
+            email=row.email,
+        )
+
         mailed = False
         error = ""
         if send_mail:

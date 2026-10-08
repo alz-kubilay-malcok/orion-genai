@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from io import BytesIO, StringIO
 from typing import Any, Mapping, Sequence
 
-from backend.src.core.naming import build_litellm_key_alias
+from backend.src.core.naming import build_litellm_key_alias, litellm_purpose_token
 
 MAX_BATCH_ROWS = 1000
 TEMPLATE_HEADERS = ("email", "name", "key_alias", "team", "environment")
@@ -86,23 +86,30 @@ def _email_ok(value: str) -> bool:
     return bool(local) and "." in domain
 
 
-def _default_alias(*, team: str, email: str, row: int, environment: str, model_name: str) -> str:
-    """``ticket`` yalnız username — Excel satır numarası artık eklenmiyor.
+def _default_alias(
+    *,
+    team: str,
+    name: str,
+    environment: str,
+    model_name: str,
+) -> str:
+    """Boş ``key_alias`` için yeni düzen.
 
-    Not: LiteLLM ``key_alias`` global olarak **unique** olmak zorunda
-    (``POST /key/generate`` aynı alias'ta 400 döner). Row numarası eskiden
-    bunu garantiliyordu; artık aynı email+team+environment+model ile iki kez
-    key üretilirse ilgili satır LiteLLM'in "already exists" hatasıyla döner
-    (diğer satırlar etkilenmez — ``process_batch`` satır bazlı hata yakalar).
-    Çakışırsa Excel'deki ``key_alias`` kolonuna elle benzersiz bir alias
-    girilebilir.
+    ``ALZ-{TEAM}-{ENV}-{MODEL}-{PURPOSE}``. Bireyselde ortaya ``BRYSL-{ISIM}``
+    girer. Purpose model ``allianz-coder`` / ``text2test`` ise ``CODER``,
+    değilse ``OTHER``. Proje segmenti model adından, en fazla 15 karakter.
+
+    LiteLLM ``key_alias`` global olarak unique olmak zorunda. Aynı
+    team+environment+model (bireyselde bir de isim) ile iki kez key üretilirse
+    ilgili satır LiteLLM'in "already exists" hatasıyla döner. Çakışırsa
+    Excel'deki ``key_alias`` kolonuna elle benzersiz bir alias girilebilir.
     """
-    local = email.split("@", 1)[0]
     return build_litellm_key_alias(
         department=team or "BATCH",
-        ticket=local,
         environment=environment,
-        purpose=model_name,
+        project=model_name,
+        purpose=litellm_purpose_token(None, [model_name]),
+        person=name,
     )
 
 
@@ -112,10 +119,9 @@ _ROW_SUFFIX_RE = re.compile(r"^([A-Z]+)(\d+)$")
 def strip_batch_row_suffix(alias: str) -> str:
     """Eski batch alias'larındaki (``USERNAME<row>``) sayı ekini kaldırır.
 
-    Alias şeması ``ALZ-{TEAM}-{TICKET}-{ENV}-{PURPOSE...}``; yalnız 3.
-    segment (``TICKET`` — username+satır no) hedeflenir, diğer segmentler
-    (department/environment/purpose) dokunulmaz. Eşleşme yoksa (row eki
-    içermiyorsa veya batch formatında değilse) alias değişmeden döner.
+    Eski şema ``ALZ-{TEAM}-{TICKET}-{ENV}-{PURPOSE}``; yalnız 3. segment
+    (``TICKET`` — username+satır no) hedeflenir. Yeni alias'ta 3. parça
+    ``DEV`` / ``PROD`` / ``BRYSL`` olduğu için eşleşmez ve alias aynen döner.
     """
     parts = alias.split("-")
     if len(parts) < 3:
@@ -178,8 +184,7 @@ def _build_batch_sheet(
         environment = (parsed.get("environment") or default_environment or "DEV").upper()
         alias = parsed.get("key_alias", "") or _default_alias(
             team=team,
-            email=email,
-            row=row_number,
+            name=name,
             environment=environment,
             model_name=model_name,
         )

@@ -60,7 +60,7 @@ Form selectbox: `mcp_sunucusu` = `server_name`, `araclar` = o satırın `tools`.
 | `departman_adi` | evet | metin |
 | `ortam` | evet | `DEV` \| `STG` \| `PROD` |
 | `talep_aciklamasi` | evet | |
-| `kullanim_amaci` | evet | `RAG` \| `CHAT` \| `AGENT` \| `DIGERI` |
+| `kullanim_amaci` | evet | `RAG` \| `CHAT` \| `AGENT` \| `DIGERI` \| `KUBEFLOW` |
 | `kullanim_senaryosu` | evet | |
 | `modeller` | evet | `allianz-text` \| `allianz-vision` \| `allianz-text-small` \| `allianz-coder` \| `text2test` (dizi, ≥1) |
 | `yanit_suresi` | evet | `realtime` \| `within_1h` \| `by_17` \| `by_next_08` |

@@ -168,7 +168,7 @@ Bu shared key'lerden sonra type-specific key'ler aynı JSON seviyesinde gelir. P
 | `departman_adi` | required text | `department_name` |
 | `ortam` | `DEV\|STG\|PROD` | `environment` |
 | `talep_aciklamasi` | required long text | `request_description` |
-| `kullanim_amaci` | `RAG\|CHAT\|AGENT\|DIGERI` | `purpose_code` |
+| `kullanim_amaci` | `RAG\|CHAT\|AGENT\|DIGERI\|KUBEFLOW` | `purpose_code` |
 | `kullanim_senaryosu` | required long text | `use_case` |
 | `modeller` | required non-empty unique array; aşağıdaki enum | `models` |
 | `yanit_suresi` | required response-time enum | `response_window` |
@@ -324,10 +324,16 @@ MCP için `STG` hiçbir alias/fallback ile kabul edilmez.
 ### 6.1 LiteLLM alias
 
 ```text
-ALZ-{DEPARTMENT}-{NORMALIZED_TICKET}-{ENVIRONMENT}-{PURPOSE}
+ALZ-{DEPARTMENT}-{ENVIRONMENT}-{PROJECT}-{PURPOSE}
 ```
 
-Örnek: `ALZ-GENAI-HD12345-DEV-RAG`.
+Bireysel (`BIREYSEL` / `BRYSL` / `BRSYL`):
+
+```text
+ALZ-{DEPARTMENT}-BRYSL-{ISIM}-{PROJECT}-{PURPOSE}
+```
+
+Örnek: `ALZ-GENAI-PROD-HD12345-AGENTIC`. Proje en fazla 15 karakter. `project_name` yoksa proje segmenti normalize ticket'tır. Purpose: `RAG` → `AGENTIC`, `CHAT` → `CHATBOT`, `AGENT` → `AGENTIC`, `DIGERI` → `OTHER`, `KUBEFLOW` → `KUBEFLOW`. Modellerde `allianz-coder` veya `text2test` varsa ve amaç eşlenmiyorsa `CODER`.
 
 ### 6.2 MCP key alias
 

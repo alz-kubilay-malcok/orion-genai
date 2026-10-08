@@ -22,7 +22,7 @@ LITELLM_MODELS = (
 )
 RESPONSE_WINDOWS = ("realtime", "within_1h", "by_17", "by_next_08")
 USAGE_FREQS = ("0_10", "10_100", "100_1000", "1000_10k")
-PURPOSES = ("RAG", "CHAT", "AGENT", "DIGERI")
+PURPOSES = ("RAG", "CHAT", "AGENT", "DIGERI", "KUBEFLOW")
 ENVIRONMENTS = ("DEV", "STG", "PROD")
 PAGE_INPUT = (1.0, 3.0, 5.0, 10.0)
 PAGE_OUTPUT = (0.5, 1.0, 3.0)

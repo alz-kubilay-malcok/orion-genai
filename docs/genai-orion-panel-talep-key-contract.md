@@ -7,7 +7,7 @@
 | `departman_adi` | Departman adı | Metin | Evet | Serbest metin |
 | `ortam` | Ortam | Tekli seçim | Evet | `DEV`, `STG`, `PROD` |
 | `talep_aciklamasi` | Talep açıklaması | Uzun metin | Evet | Serbest metin |
-| `kullanim_amaci` | Kullanım amacı | Tekli seçim | Evet | `RAG`, `CHAT`, `AGENT`, `DIGERI` |
+| `kullanim_amaci` | Kullanım amacı | Tekli seçim | Evet | `RAG`, `CHAT`, `AGENT`, `DIGERI`, `KUBEFLOW` |
 | `kullanim_senaryosu` | Kullanım senaryosu | Uzun metin | Evet | Serbest metin |
 | `modeller` | Talep edilen model | Çoklu seçim | Evet | `allianz-text`, `allianz-vision`, `allianz-text-small`, `allianz-coder`, `text2test` |
 | `yanit_suresi` | Beklenen yanıt süresi | Tekli seçim | Evet | `realtime`, `within_1h`, `by_17`, `by_next_08` |
