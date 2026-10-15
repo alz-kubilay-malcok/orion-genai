@@ -85,6 +85,13 @@ async def receive_orion_webhook(
     if rejected is not None:
         return rejected
 
+    # Orion'dan gelen ham JSON body'yi olduğu gibi logla (imza doğrulandıktan sonra).
+    logger.info(
+        "orion.webhook.body %s",
+        body.decode("utf-8", errors="replace") if body else "<empty>",
+        extra={"event": "orion.webhook.body"},
+    )
+
     try:
         raw = json.loads(body) if body else None
     except Exception:  # noqa: BLE001
