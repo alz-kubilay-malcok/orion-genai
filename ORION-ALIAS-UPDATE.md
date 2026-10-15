@@ -32,7 +32,7 @@ Eski seçeneklerin karşılığı: `RAG` ve `AGENT` → `AGENTIC`, `CHAT` → `C
 
 ## 3. Proje (`proje_adi`)
 
-Yeni zorunlu metin alanı. Alias’ta en fazla 15 karakter kullanılır. Örnek: `Knime` → `KNIME`, `VS Code` → `VS-CODE`.
+Yeni zorunlu metin alanı. Alias’ta sadece harf ve rakam kullanılır (boşluk, tire vb. atılır), en fazla 15 karakter. Örnek: `Knime` → `KNIME`, `VS Code` → `VSCODE`. 15 karakteri aşarsa her kelimenin ilk harfi korunup kalan sesli harfler atılır: `contact center profanity` → `CNTCTCNTRPRFNTY`.
 
 ## Örnekler
 

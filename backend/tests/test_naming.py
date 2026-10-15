@@ -13,7 +13,25 @@ def test_litellm_alias_shared_layout():
         project="HD-12345",
         purpose="AGENTIC",
     )
-    assert alias == "ALZ-GENAI-PROD-HD-12345-AGENTIC"
+    assert alias == "ALZ-GENAI-PROD-HD12345-AGENTIC"
+
+
+def test_project_segment_follows_migration_sheet():
+    # api_key_migration.xlsx: sığıyorsa olduğu gibi, sığmıyorsa sesli harf atılır
+    assert build_litellm_key_alias(
+        department="MOTOR", environment="PROD", project="VoC", purpose="CHATBOT",
+    ) == "ALZ-MOTOR-PROD-VOC-CHATBOT"
+    assert build_litellm_key_alias(
+        department="X", environment="DEV", project="internal-assistai-test",
+        purpose="CHATBOT",
+    ).split("-")[3] == "INTRNLASSSTTST"[:15]
+    assert build_litellm_key_alias(
+        department="X", environment="DEV", project="contact_center_profanity",
+        purpose="CHATBOT",
+    ).split("-")[3] == "CNTCTCNTRPRFNTY"
+    assert build_litellm_key_alias(
+        department="X", environment="DEV", project="Sağlık Parser", purpose="IDP",
+    ).split("-")[3] == "SAGLIKPARSER"
 
 
 def test_litellm_alias_bireysel_inserts_name():

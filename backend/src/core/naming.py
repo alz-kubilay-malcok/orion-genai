@@ -75,12 +75,26 @@ def _is_bireysel(environment: object) -> bool:
     return token in _BIREYSEL_ENVS
 
 
+_NON_ALNUM = re.compile(r"[^A-Z0-9]+")
+_VOWELS = re.compile(r"[AEIOU]")
+
+
 def _project_segment(value: object) -> str:
-    text = _segment(value)
-    if len(text) <= _MAX_PROJECT_LEN:
-        return text
-    trimmed = text[:_MAX_PROJECT_LEN].rstrip("-")
-    return trimmed or "NA"
+    """Proje segmenti (api_key_migration.xlsx → api_key_alias kuralları).
+
+    - Türkçe karakterler katlanır, büyük harf, sadece harf/rakam (tire yok).
+    - En fazla 15 karakter. Sığıyorsa olduğu gibi kalır.
+    - Sığmıyorsa her kelimenin ilk harfi korunup kalan sesli harfler atılır
+      (``internal assistai`` → ``INTRNLASSST``), sonra 15'e kesilir.
+    """
+    words = [w for w in _NON_ALNUM.split(_fold(value)) if w]
+    if not words:
+        return "NA"
+    joined = "".join(words)
+    if len(joined) <= _MAX_PROJECT_LEN:
+        return joined
+    short = "".join(w[0] + _VOWELS.sub("", w[1:]) for w in words)
+    return short[:_MAX_PROJECT_LEN]
 
 
 def litellm_purpose_token(purpose: object, models: object = None) -> str:

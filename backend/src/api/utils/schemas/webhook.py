@@ -33,6 +33,7 @@ class LitellmKeyPayload(SharedFields):
     ortam: str | None = None
     talep_aciklamasi: str | None = None
     kullanim_amaci: str | None = None
+    proje_adi: str | None = None
     kullanim_senaryosu: str | None = None
     modeller: list[str] = Field(default_factory=list)
     yanit_suresi: str | None = None
