@@ -18,6 +18,7 @@ from .config_approvers import config_approvers_migration
 from .config_mcp_servers import config_mcp_servers_migration
 from .config_mcp_tools import config_mcp_tools_migration
 from .enums import enums_migration
+from .environment_bireysel import environment_bireysel_migration
 from .mail_jwt_tokens import mail_jwt_tokens_migration
 from .mail_messages import mail_messages_migration
 from .outbox_jobs import outbox_jobs_migration
@@ -48,6 +49,7 @@ MIGRATIONS: list[Migration] = [
     mail_jwt_tokens_migration,
     auth_security_migration,
     requests_litellm_team_migration,
+    environment_bireysel_migration,
 ]
 
 __all__ = ["MIGRATIONS"]

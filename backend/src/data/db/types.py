@@ -220,7 +220,9 @@ REQUEST_STATUS = NativeEnum(
     "provisioning", "completed", "rejected", "failed", "expired",
     enum_name="request_status",
 )
-ENVIRONMENT = NativeEnum("DEV", "STG", "TEST", "PROD", enum_name="environment")
+ENVIRONMENT = NativeEnum(
+    "DEV", "STG", "TEST", "PROD", "BIREYSEL", enum_name="environment",
+)
 REPO_PLATFORM = NativeEnum("GITHUB", "BITBUCKET", enum_name="repo_platform")
 OUTBOX_STATUS = NativeEnum(
     "pending", "processing", "retry", "completed", "dead_letter",

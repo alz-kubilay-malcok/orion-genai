@@ -88,6 +88,7 @@ class Environment(str, Enum):
     STG = "STG"
     TEST = "TEST"
     PROD = "PROD"
+    BIREYSEL = "BIREYSEL"
 
 
 # ---- Type → izinli eylemler eşlemesi -------------------------------------
