@@ -92,6 +92,7 @@ async def _load_request(session: AsyncSession, request_id: uuid.UUID) -> dict | 
         "key_alias": getattr(row, "key_alias", None),
         "mcp_server_slug": getattr(row, "mcp_server_slug", None),
         "mcp_server_display_name": getattr(row, "mcp_server_display_name", None),
+        "project_name": getattr(row, "project_name", None),
         "mcp_tool_names": getattr(row, "mcp_tool_names", None),
         "all_tools": getattr(row, "all_tools", None),
         "registry_allows_all_tools": getattr(row, "registry_allows_all_tools", None),

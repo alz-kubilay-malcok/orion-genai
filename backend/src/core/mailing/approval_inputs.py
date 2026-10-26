@@ -131,9 +131,15 @@ def mcp_approval_inputs(
         "department_name": _s(request.get("department_name")),
         "environment": _s(request.get("environment")),
         "server_display_name": _s(
-            request.get("mcp_server_display_name") or request.get("server_display_name"),
+            request.get("mcp_server_display_name")
+            or request.get("server_display_name")
+            or request.get("project_name"),
         ),
-        "server_slug": _s(request.get("mcp_server_slug") or request.get("server_slug")),
+        "server_slug": _s(
+            request.get("mcp_server_slug")
+            or request.get("server_slug")
+            or request.get("project_name"),
+        ),
         "key_alias": _s(request.get("key_alias")),
         "all_tools_label": _s(
             request.get("all_tools_label")

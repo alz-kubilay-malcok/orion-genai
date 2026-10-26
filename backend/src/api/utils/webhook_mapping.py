@@ -51,6 +51,37 @@ _RESERVED_ORM = {
     "raw_genai_orion_panel_payload",
 }
 
+_ENV_ALIASES = {
+    "PROD": "PROD", "PRODUCTION": "PROD", "PRD": "PROD",
+    "DEV": "DEV", "DEVELOPMENT": "DEV",
+    "TEST": "TEST",
+    "STG": "STG", "STAGE": "STG", "STAGING": "STG",
+    "BIREYSEL": "BIREYSEL", "BRYSL": "BIREYSEL", "BRSYL": "BIREYSEL",
+}
+_REPO_ALIASES = {
+    "GITHUB": "GITHUB",
+    "BITBUCKET": "BITBUCKET",
+    "STASH": "BITBUCKET",
+}
+
+
+def _fold_token(value: object) -> str:
+    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+
+def _normalize_environment(value: object) -> str | None:
+    token = _fold_token(value)
+    if not token:
+        return None
+    return _ENV_ALIASES.get(token, token)
+
+
+def _normalize_repo_platform(value: object) -> str | None:
+    token = _fold_token(value)
+    if not token:
+        return None
+    return _REPO_ALIASES.get(token, token)
+
 
 def resolve_request_type(talep_turu: str) -> str:
     if talep_turu not in TALEP_TURU_MAPPING:
@@ -87,6 +118,19 @@ def payload_to_request_fields(
         }:
             continue
         fields[snakecase] = v
+    if "environment" in fields:
+        fields["environment"] = _normalize_environment(fields.get("environment"))
+    if "repo_platform" in fields:
+        fields["repo_platform"] = _normalize_repo_platform(fields.get("repo_platform"))
+    if request_type == "mcp_server_registry":
+        project = str(fields.get("project_name") or "").strip()
+        if project and not str(fields.get("mcp_server_slug") or "").strip():
+            fields["mcp_server_slug"] = project
+        env = fields.get("environment")
+        score = fields.get("minimum_evaluation_score")
+        if env == "PROD" and (score is None or int(score) < 90):
+            msg = "PROD MCP kaydı için minimum_evaluation_skoru >= 90 olmalı"
+            raise ValueError(msg)
     if request_type == "mcp_key":
         from backend.src.core.mcp_scopes import persist_fields
 

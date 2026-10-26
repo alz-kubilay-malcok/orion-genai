@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, field_validator, model_validator
 
 from backend.src.core.mcp_scopes import McpScope, normalize_scopes
 
@@ -47,7 +47,7 @@ class LitellmKeyPayload(SharedFields):
 class McpErisim(BaseModel):
     """Tek sunucu kapsamı — ``erisimler`` dizisi öğesi."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     mcp_sunucusu: str = Field(min_length=1, max_length=200)
     araclar: list[str] = Field(default_factory=list)
@@ -55,10 +55,13 @@ class McpErisim(BaseModel):
 
 
 class McpKeyPayload(SharedFields):
+    model_config = ConfigDict(extra="ignore")
+
     departman_adi: str | None = None
     ortam: str | None = None
     talep_aciklamasi: str | None = None
     kullanim_amaci: str | None = None
+    proje_adi: str | None = None
     mcp_sunucusu: str | list[str] | None = None
     araclar: list[str] | dict[str, list[str]] = Field(default_factory=list)
     tum_araclara_erisim: bool | dict[str, bool] | None = None
@@ -92,6 +95,8 @@ class McpKeyPayload(SharedFields):
 
 
 class McpRegistryPayload(SharedFields):
+    model_config = ConfigDict(extra="ignore")
+
     departman_adi: str | None = None
     ortam: str | None = None
     talep_aciklamasi: str | None = None
@@ -108,6 +113,17 @@ class McpRegistryPayload(SharedFields):
     minimum_evaluation_skoru: int | None = None
     minimum_degerlendirme_skoru: int | None = None
     ek_notlar: str | None = None
+
+    @field_validator(
+        "repo_url", "mcp_endpoint_url", "teknik_sorumlu_eposta",
+        "repo_platformu", "ortam",
+        mode="before",
+    )
+    @classmethod
+    def _blank_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 SCHEMA_BY_TALEP_TURU: dict[str, type[SharedFields]] = {

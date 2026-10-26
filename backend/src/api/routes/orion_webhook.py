@@ -15,11 +15,15 @@ from uuid import uuid4
 from fastapi import APIRouter, Header, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from ...core.mailing.outbox_helpers import enqueue_approval_request_mail
+from ...data.db.models.approval_tokens import ApprovalToken
 from ...data.db.models.config_approvers import ConfigApprover
+from ...data.db.models.outbox_jobs import OutboxJob
 from ...data.db.models.requests import Request as RequestModel
+from ...domain.enums import OutboxJobType
 from ...data.db.repository import RequestRepository
 from ...observability.events import log_event
 from ..utils.action_tokens import compact_of, issue_tokens_for_request
@@ -45,6 +49,72 @@ async def _approver_recipients(session) -> list[str]:
 
 def _action_base() -> str:
     return os.getenv("PUBLIC_ACTION_BASE_URL", "http://localhost:8056/approvals").rstrip("/")
+
+
+_LIVE_MAIL_STATUSES = ("pending", "processing", "retry", "completed")
+
+
+async def _has_live_approval_mail(session, request_id) -> bool:
+    row = await session.scalar(
+        select(OutboxJob.id).where(
+            OutboxJob.aggregate_id == request_id,
+            OutboxJob.job_type == OutboxJobType.SEND_APPROVAL_MAIL.value,
+            OutboxJob.status.in_(_LIVE_MAIL_STATUSES),
+        ).limit(1)
+    )
+    return row is not None
+
+
+async def _enqueue_approver_mails(
+    session,
+    *,
+    state,
+    db_request,
+    request_type: str,
+    created_by: str,
+) -> tuple[int, list[str]]:
+    await session.execute(
+        delete(ApprovalToken).where(
+            ApprovalToken.request_id == db_request.id,
+            ApprovalToken.used_at.is_(None),
+        )
+    )
+    await session.execute(
+        delete(OutboxJob).where(
+            OutboxJob.aggregate_id == db_request.id,
+            OutboxJob.job_type == OutboxJobType.SEND_APPROVAL_MAIL.value,
+            OutboxJob.status == "dead_letter",
+        )
+    )
+    token_rows = issue_tokens_for_request(
+        state.token_signer,
+        request_id=db_request.id,
+        request_type=request_type,
+        ttl_hours=state.settings.action_token_ttl_hours,
+    )
+    action_urls: dict[str, str] = {}
+    base = _action_base()
+    for token_row in token_rows:
+        session.add(token_row)
+        compact = compact_of(token_row)
+        if compact:
+            action_urls[token_row.action] = f"{base}/{quote(compact, safe='.-_')}"
+    recipients = await _approver_recipients(session)
+    enqueued = 0
+    for recipient in recipients:
+        await enqueue_approval_request_mail(
+            session,
+            request_id=db_request.id,
+            request_type=request_type,
+            recipient=recipient,
+            viewer_base=base,
+            token=compact_of(token_rows[0]) if token_rows else "",
+            required_action="approve",
+            created_by=created_by,
+            action_urls=action_urls,
+        )
+        enqueued += 1
+    return enqueued, recipients
 
 
 def webhook_signature_failure(request: Request, body: bytes) -> JSONResponse | None:
@@ -167,12 +237,26 @@ async def receive_orion_webhook(
             request_type=request_type,
         )
         if existing is not None:
+            resent = 0
+            if (
+                existing.status == "waiting_approval"
+                and not await _has_live_approval_mail(session, existing.id)
+            ):
+                resent, _recipients = await _enqueue_approver_mails(
+                    session,
+                    state=state,
+                    db_request=existing,
+                    request_type=request_type,
+                    created_by=payload.talep_eden_eposta,
+                )
+                await session.commit()
             log_event(
                 logger, "orion.webhook.duplicate",
                 request_id=str(existing.id),
                 ticket_no=payload.talep_no,
                 request_type=request_type,
                 status=existing.status,
+                approver_mails_enqueued=resent,
             )
             return JSONResponse(
                 status_code=status.HTTP_202_ACCEPTED,
@@ -180,50 +264,59 @@ async def receive_orion_webhook(
                     "request_id": str(existing.id),
                     "status": existing.status,
                     "duplicate": True,
+                    "approver_mails_enqueued": resent,
                 },
                 headers={"X-Correlation-Id": x_correlation_id or ""},
             )
 
-        request_fields = payload_to_request_fields(
-            payload, request_type=request_type, raw=raw,
-        )
+        try:
+            request_fields = payload_to_request_fields(
+                payload, request_type=request_type, raw=raw,
+            )
+        except ValueError as exc:
+            log_event(
+                logger, "orion.webhook.invalid",
+                level=logging.WARNING,
+                error_code="VALIDATION_ERROR",
+                talep_turu=talep_turu,
+                exc_msg=str(exc),
+            )
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content={"error_code": "VALIDATION_ERROR",
+                         "field_errors": [str(exc)]},
+            )
         now = datetime.now(UTC).replace(tzinfo=None)
         request_fields.setdefault("id", uuid4())
         request_fields.setdefault("created_at", now)
         request_fields.setdefault("updated_at", now)
-        new_db_request = RequestModel(**request_fields)
-        await repo.save(new_db_request)
-        await session.flush()
-
-        token_rows = issue_tokens_for_request(
-            state.token_signer,
-            request_id=new_db_request.id,
-            request_type=request_type,
-            ttl_hours=state.settings.action_token_ttl_hours,
-        )
-        action_urls: dict[str, str] = {}
-        base = _action_base()
-        for token_row in token_rows:
-            session.add(token_row)
-            compact = compact_of(token_row)
-            if compact:
-                action_urls[token_row.action] = f"{base}/{quote(compact, safe='.-_')}"
-
-        recipients = await _approver_recipients(session)
-        enqueued = 0
-        for recipient in recipients:
-            await enqueue_approval_request_mail(
-                session,
-                request_id=new_db_request.id,
-                request_type=request_type,
-                recipient=recipient,
-                viewer_base=base,
-                token=compact_of(token_rows[0]) if token_rows else "",
-                required_action="approve",
-                created_by=payload.talep_eden_eposta,
-                action_urls=action_urls,
+        try:
+            new_db_request = RequestModel(**request_fields)
+            await repo.save(new_db_request)
+            await session.flush()
+        except (SQLAlchemyError, TypeError) as exc:
+            await session.rollback()
+            log_event(
+                logger, "orion.webhook.invalid",
+                level=logging.ERROR,
+                error_code="PERSIST_ERROR",
+                talep_turu=talep_turu,
+                ticket_no=payload.talep_no,
+                exc_msg=str(exc),
             )
-            enqueued += 1
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content={"error_code": "PERSIST_ERROR",
+                         "field_errors": [str(exc).split("\n", 1)[0]]},
+            )
+
+        enqueued, recipients = await _enqueue_approver_mails(
+            session,
+            state=state,
+            db_request=new_db_request,
+            request_type=request_type,
+            created_by=payload.talep_eden_eposta,
+        )
 
         await session.commit()
 

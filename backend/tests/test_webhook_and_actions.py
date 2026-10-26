@@ -1,8 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.src.api.utils.schemas.webhook import LitellmKeyPayload, McpKeyPayload
-from backend.src.api.utils.webhook_mapping import resolve_request_type
+from backend.src.api.utils.schemas.webhook import (
+    LitellmKeyPayload,
+    McpKeyPayload,
+    McpRegistryPayload,
+)
+from backend.src.api.utils.webhook_mapping import payload_to_request_fields, resolve_request_type
 from backend.src.domain.enums import VALID_ACTIONS_BY_TYPE, ApprovalAction, RequestType
 
 
@@ -102,6 +106,60 @@ def test_mcp_payload_multi_flat_tools_rejected():
                 "araclar": ["rag"],
                 "tum_araclara_erisim": False,
             }
+        )
+
+
+def test_mcp_key_accepts_proje_adi_and_ignores_unknown_fields():
+    payload = McpKeyPayload.model_validate(
+        {
+            **SHARED,
+            "talep_turu": "mcp_erisim_anahtari",
+            "ortam": "prod",
+            "proje_adi": "document-search",
+            "unknown_orion_field": "ignore-me",
+            "mcp_sunucusu": "document-search",
+            "araclar": ["rag"],
+            "tum_araclara_erisim": False,
+        }
+    )
+    assert payload.proje_adi == "document-search"
+    fields = payload_to_request_fields(payload, "mcp_key", payload.model_dump(mode="json"))
+    assert fields["project_name"] == "document-search"
+    assert fields["environment"] == "PROD"
+
+
+def test_mcp_registry_normalizes_and_copies_slug():
+    payload = McpRegistryPayload.model_validate(
+        {
+            **SHARED,
+            "talep_turu": "mcp_sunucu_kaydi",
+            "ortam": "TEST",
+            "proje_adi": "document-search",
+            "mcp_sunucu_adi": "Doküman Arama MCP",
+            "repo_platformu": "bitbucket",
+            "extra_form_field": True,
+        }
+    )
+    fields = payload_to_request_fields(
+        payload, "mcp_server_registry", payload.model_dump(mode="json"),
+    )
+    assert fields["environment"] == "TEST"
+    assert fields["repo_platform"] == "BITBUCKET"
+    assert fields["mcp_server_slug"] == "document-search"
+
+
+def test_mcp_registry_prod_requires_min_score():
+    payload = McpRegistryPayload.model_validate(
+        {
+            **SHARED,
+            "talep_turu": "mcp_sunucu_kaydi",
+            "ortam": "PROD",
+            "proje_adi": "document-search",
+        }
+    )
+    with pytest.raises(ValueError, match="minimum_evaluation_skoru"):
+        payload_to_request_fields(
+            payload, "mcp_server_registry", payload.model_dump(mode="json"),
         )
 
 

@@ -177,9 +177,15 @@ def mcp_result_inputs(
         "ticket_url": _s(request.get("genai_orion_panel_ticket_url")),
         "environment": _s(request.get("environment")),
         "server_display_name": _s(
-            request.get("mcp_server_display_name") or request.get("server_display_name"),
+            request.get("mcp_server_display_name")
+            or request.get("server_display_name")
+            or request.get("project_name"),
         ),
-        "server_slug": _s(request.get("mcp_server_slug") or request.get("server_slug")),
+        "server_slug": _s(
+            request.get("mcp_server_slug")
+            or request.get("server_slug")
+            or request.get("project_name"),
+        ),
         "outcome_class": outcome_class,
         "outcome_label": outcome_label,
         "key_alias": _s(request.get("key_alias")),
