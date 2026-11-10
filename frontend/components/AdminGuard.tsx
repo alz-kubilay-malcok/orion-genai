@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { LogOut, LayoutDashboard, Users, Mail, FileSpreadsheet } from "lucide-react";
+import { LogOut, LayoutDashboard, Users, Mail, FileSpreadsheet, KeyRound } from "lucide-react";
 
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,12 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
                   className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
                 >
                   <FileSpreadsheet className="size-4" /> Toplu key
+                </Link>
+                <Link
+                  href="/admin/keys"
+                  className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <KeyRound className="size-4" /> Key oluştur
                 </Link>
               </>
             )}

@@ -8,11 +8,12 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from backend.src.api.auth.dependencies import get_current_superuser
 from backend.src.core.batch_keys import (
     BatchExcelError,
+    BatchRow,
     PreviewRow,
     build_export_csv,
     build_export_xlsx,
@@ -100,6 +101,89 @@ async def create_new_litellm_team(
             content={"error_code": "LITELLM_TEAM_CREATE_FAILED", "detail": str(exc)},
         )
     return JSONResponse(content=team)
+
+
+class ManualKeyBody(BaseModel):
+    """Orion talebi olmadan tek LiteLLM key. ``team`` gerçek team id veya alias."""
+
+    name: str = Field(min_length=1, max_length=200)
+    email: EmailStr
+    environment: str = "DEV"
+    model_name: str = Field(min_length=1, max_length=128)
+    team: str = Field(min_length=1, max_length=128)
+    key_alias: str = ""
+    max_parallel_requests: int | None = Field(default=None, ge=1)
+    send_mail: bool = False
+
+
+@router.post("/keys")
+async def create_manual_key(
+    user: Annotated[User, Depends(get_current_superuser)],
+    body: ManualKeyBody,
+) -> JSONResponse:
+    """Panelden tek key üretir. ``requests`` tablosuna yazılmaz."""
+    from backend.src.core.batch_keys.excel import _default_alias
+
+    environment = (body.environment or "DEV").strip().upper() or "DEV"
+    team = body.team.strip()
+    model = body.model_name.strip()
+    name = body.name.strip()
+    alias = (body.key_alias or "").strip() or _default_alias(
+        team=team,
+        name=name,
+        environment=environment,
+        model_name=model,
+    )
+    base, credential = resolve_litellm_http(environment, kind="litellm")
+    if not base or not credential:
+        return JSONResponse(
+            status_code=503,
+            content={"error_code": "LITELLM_NOT_CONFIGURED"},
+        )
+    logger.info(
+        "manual-key start alias=%s env=%s model=%s by=%s",
+        alias, environment, model, user.username,
+    )
+    results = await process_batch(
+        [
+            BatchRow(
+                row=1,
+                email=str(body.email),
+                name=name,
+                key_alias=alias,
+                team=team,
+                environment=environment,
+            )
+        ],
+        model_name=model,
+        send_mail=body.send_mail,
+        max_parallel_requests=body.max_parallel_requests,
+        auto_create_team=False,
+        metadata={"source": "admin_manual_key", "actor": user.username},
+    )
+    item = results[0]
+    if not item.ok:
+        return JSONResponse(
+            status_code=422,
+            content={"error_code": "KEY_CREATE_FAILED", "detail": item.error},
+        )
+    logger.info(
+        "manual-key ok alias=%s mailed=%s by=%s",
+        item.key_alias, item.mailed, user.username,
+    )
+    return JSONResponse(
+        content={
+            "api_key": item.api_key,
+            "key_alias": item.key_alias,
+            "email": item.email,
+            "name": item.name,
+            "team": item.team,
+            "environment": item.environment,
+            "model_name": model,
+            "mailed": item.mailed,
+            "mail_error": item.error,
+        }
+    )
 
 
 @router.post("/batch-keys")

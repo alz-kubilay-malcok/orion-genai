@@ -405,6 +405,7 @@ const BATCH_ERROR_LABELS: Record<string, string> = {
   INVALID_CSV: "CSV okunamadı",
   NOTHING_TO_UPDATE: "Güncellenecek alan yok (takım, max parallel, model veya blokla)",
   LITELLM_TEAM_CREATE_FAILED: "LiteLLM'de team oluşturulamadı",
+  KEY_CREATE_FAILED: "Key oluşturulamadı",
   LITELLM_TEAM_RESOLVE_FAILED: "Takım LiteLLM'de bulunamadı/oluşturulamadı",
 };
 
@@ -598,6 +599,48 @@ export const batchUpdateResultSchema = z.object({
   rows: z.array(batchUpdateResultRowSchema),
 });
 export type BatchUpdateResult = z.infer<typeof batchUpdateResultSchema>;
+
+export const manualKeyResultSchema = z.object({
+  api_key: z.string(),
+  key_alias: z.string(),
+  email: z.string(),
+  name: z.string(),
+  team: z.string(),
+  environment: z.string(),
+  model_name: z.string(),
+  mailed: z.boolean(),
+  mail_error: z.string(),
+});
+export type ManualKeyResult = z.infer<typeof manualKeyResultSchema>;
+
+export async function createManualKey(params: {
+  name: string;
+  email: string;
+  environment: string;
+  modelName: string;
+  team: string;
+  keyAlias?: string;
+  maxParallelRequests?: number | null;
+  sendMail: boolean;
+}): Promise<ManualKeyResult> {
+  const res = await adminFetch("/admin/keys", {
+    method: "POST",
+    body: JSON.stringify({
+      name: params.name,
+      email: params.email,
+      environment: params.environment,
+      model_name: params.modelName,
+      team: params.team,
+      key_alias: params.keyAlias || "",
+      max_parallel_requests: params.maxParallelRequests ?? null,
+      send_mail: params.sendMail,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await batchErrorMessage(res, "Key oluşturulamadı"));
+  }
+  return manualKeyResultSchema.parse(await res.json());
+}
 
 export async function updateBatchKeys(params: {
   environment: string;
