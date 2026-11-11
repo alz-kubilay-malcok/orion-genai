@@ -38,7 +38,7 @@ def provider(monkeypatch):
         "servers": [{"server_name": "search", "alias": "search-alias", "server_id": "new"}],
         "keys": [{"key_alias": "ALZ-BRYSL-KEY", "token": "private-key-token"}],
         "error_path": None, "invalid_json": False,
-        "network_error": False, "empty_update": False,
+        "network_error": False, "empty_update": False, "race_drops": 0,
     }
 
     def handle(request):
@@ -65,7 +65,11 @@ def provider(monkeypatch):
             payload = json.loads(request.content)
             state["updates"].append(payload)
             if state["verify"]:
-                state["permissions"] = payload["object_permission"]
+                saved = dict(payload["object_permission"])
+                if state["race_drops"] > 0:
+                    state["race_drops"] -= 1
+                    saved["mcp_servers"] = ["existing", "other-writer"]
+                state["permissions"] = saved
             if state["empty_update"]:
                 return httpx.Response(204)
             return httpx.Response(200, json={"status": "success"})
@@ -108,6 +112,31 @@ def test_verification_failure(provider):
     provider["verify"] = False
     with pytest.raises(service.McpGrantError, match="verification failed"):
         grant()
+    assert len(provider["updates"]) == service.MAX_GRANT_ATTEMPTS
+
+
+def test_concurrent_overwrite_is_merged_on_retry(provider):
+    provider["race_drops"] = 1
+    result = grant()
+    assert result["status"] == "granted"
+    assert [item["object_permission"]["mcp_servers"] for item in provider["updates"]] == [
+        ["existing", "new"],
+        ["existing", "new", "other-writer"],
+    ]
+
+
+@pytest.mark.parametrize("key", ["data", "servers", "mcp_servers", "result"])
+def test_wrapped_server_list(provider, key):
+    provider["servers"] = {key: provider["servers"]}
+    assert grant()["mcp_server_id"] == "new"
+
+
+def test_unrecognized_server_payload(provider):
+    provider["servers"] = {"unexpected": provider["servers"]}
+    with pytest.raises(service.McpGrantError, match="invalid MCP server list") as error:
+        grant()
+    assert error.value.status_code == 502
+    assert provider["updates"] == []
 
 
 @pytest.mark.parametrize("alias", ["BRYSL", "brysel-key", "B\u0130REYSEL", "b\u0131reysel"])

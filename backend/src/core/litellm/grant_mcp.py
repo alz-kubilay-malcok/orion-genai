@@ -9,6 +9,8 @@ import httpx
 from backend.src.core.litellm.target import resolve_litellm_http
 
 REQUIRED_ALIAS_PARTS = ("brysl", "brysel", "bireysel")
+SERVER_LIST_KEYS = ("data", "servers", "mcp_servers", "result")
+MAX_GRANT_ATTEMPTS = 3
 
 
 class McpGrantError(Exception):
@@ -46,6 +48,20 @@ def _info(payload: Any) -> dict[str, Any]:
     return payload["info"]
 
 
+def _server_rows(payload: Any) -> list[dict[str, Any]]:
+    rows = payload
+    if isinstance(payload, dict):
+        rows = None
+        for key in SERVER_LIST_KEYS:
+            value = payload.get(key)
+            if isinstance(value, list):
+                rows = value
+                break
+    if not isinstance(rows, list) or not all(isinstance(item, dict) for item in rows):
+        raise McpGrantError(502, "LiteLLM returned an invalid MCP server list")
+    return rows
+
+
 def _permissions(info: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     permissions = info.get("object_permission")
     if permissions is None:
@@ -73,9 +89,7 @@ async def grant_mcp_access(
         base_url=base + "/", headers={"Authorization": f"Bearer {credential}"},
         timeout=30.0, trust_env=False,
     ) as client:
-        servers = await _request(client, "GET", "/v1/mcp/server")
-        if not isinstance(servers, list) or not all(isinstance(item, dict) for item in servers):
-            raise McpGrantError(502, "LiteLLM returned an invalid MCP server list")
+        servers = _server_rows(await _request(client, "GET", "/v1/mcp/server"))
         matches = [
             item for item in servers
             if mcp_name in (item.get("server_name"), item.get("alias"))
@@ -106,11 +120,14 @@ async def grant_mcp_access(
         if not isinstance(token, str) or not token:
             raise McpGrantError(502, "LiteLLM returned an invalid key token")
 
-        before = _info(await _request(client, "GET", "/key/info", params={"key": token}))
-        permissions, current = _permissions(before)
-        already_granted = server_id in current
-        after = before
-        if not already_granted:
+        wrote = False
+        after: dict[str, Any] | None = None
+        for _ in range(MAX_GRANT_ATTEMPTS):
+            before = _info(await _request(client, "GET", "/key/info", params={"key": token}))
+            permissions, current = _permissions(before)
+            if server_id in current:
+                after = before
+                break
             updated = {
                 name: value for name, value in permissions.items()
                 if name != "object_permission_id"
@@ -121,12 +138,17 @@ async def grant_mcp_access(
                 expect_json=False,
                 json={"key": token, "object_permission": updated},
             )
+            wrote = True
             after = _info(await _request(client, "GET", "/key/info", params={"key": token}))
             _, verified_servers = _permissions(after)
-            if not {*current, server_id}.issubset(verified_servers):
-                raise McpGrantError(502, "Update accepted but MCP access verification failed")
+            if {*current, server_id}.issubset(verified_servers):
+                break
+        else:
+            raise McpGrantError(502, "Update accepted but MCP access verification failed")
+        if after is None:
+            raise McpGrantError(502, "Update accepted but MCP access verification failed")
         return {
-            "status": "already_granted" if already_granted else "granted",
+            "status": "granted" if wrote else "already_granted",
             "key_alias": key_alias,
             "mcp_name": mcp_name,
             "mcp_server_id": server_id,

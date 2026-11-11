@@ -454,7 +454,17 @@ async function batchErrorMessage(res: Response, fallback: string): Promise<strin
   const json = await res.json().catch(() => ({}));
   const code = typeof json.error_code === "string" ? json.error_code : "";
   const detail = typeof json.detail === "string" ? json.detail : "";
-  return detail || BATCH_ERROR_LABELS[code] || fallback;
+  if (detail) return detail;
+  if (Array.isArray(json.detail)) {
+    const text = json.detail
+      .map((item: unknown) => (
+        item && typeof item === "object" && "msg" in item && typeof item.msg === "string" ? item.msg : ""
+      ))
+      .filter(Boolean)
+      .join("; ");
+    if (text) return text;
+  }
+  return BATCH_ERROR_LABELS[code] || fallback;
 }
 
 export async function submitBatchKeys(params: {
@@ -671,4 +681,38 @@ export async function updateBatchKeys(params: {
     throw new Error(await batchErrorMessage(res, "Güncelleme başarısız"));
   }
   return batchUpdateResultSchema.parse(await res.json());
+}
+
+export const grantMcpResultSchema = z.object({
+  status: z.enum(["granted", "already_granted"]),
+  key_alias: z.string(),
+  mcp_name: z.string(),
+  mcp_server_id: z.string(),
+  environment: z.string(),
+  notification: z.object({
+    status: z.string(),
+    recipient_email: z.string(),
+  }),
+});
+export type GrantMcpResult = z.infer<typeof grantMcpResultSchema>;
+
+export async function grantMcpAccess(params: {
+  keyAlias: string;
+  mcpName: string;
+  environment: string;
+  recipientEmail: string;
+}): Promise<GrantMcpResult> {
+  const res = await adminFetch("/admin/grant-mcp", {
+    method: "POST",
+    body: JSON.stringify({
+      key_alias: params.keyAlias,
+      mcp_name: params.mcpName,
+      environment: params.environment,
+      recipient_email: params.recipientEmail,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await batchErrorMessage(res, "MCP erişimi verilemedi"));
+  }
+  return grantMcpResultSchema.parse(await res.json());
 }
