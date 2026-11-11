@@ -1,0 +1,251 @@
+MCP ACCESS GRANT INTEGRATION
+Date: 2026-11-10
+All paths below are relative to the orion-genai repository root.
+
+1. PURPOSE AND SCOPE
+
+Integrate the working litellm_api_key_update/main.py grant operation into
+Orion, then notify the supplied recipient after access is verified.
+Only backend/src/api/main.py was edited among existing tracked source files.
+All feature logic, template, tests and mail-check script are separate files.
+The original standalone service was NOT changed.
+No frontend, database schema, worker, existing mailer, dependency list, proxy
+configuration, existing approval flow or provisioning flow was changed.
+This is a new admin operation; existing webhooks do not call it automatically.
+It does not create an approval request, send lifecycle callbacks or issue a key.
+
+2. FILE INVENTORY: COPY THESE TO THE DEPLOYMENT REPOSITORY
+
+ADDED backend/src/core/litellm/grant_mcp.py
+  - Async httpx implementation of the existing grant sequence.
+  - Keeps the BRYSL / BRYSEL / BIREYSEL alias restriction and Turkish I folding.
+  - Resolves credentials through Orion's existing resolve_litellm_http helper
+    with kind=litellm (not a separate MCP_GATEWAY override).
+  - Exact server name/alias and exact key alias lookup. Rejects ambiguous
+    matches in the provider response instead of choosing the first match.
+  - Reads key permissions, adds the server, updates, then reads back to verify
+    the new server and previously granted MCP servers are present.
+  - Preserves existing permission fields, including empty/false values and
+    future fields, instead of filtering with the standalone allowlist.
+    The read-only object_permission_id is not submitted to /key/update.
+  - Successful updates need not return a JSON body; read-back is authoritative.
+  - Does not return the key token or raw upstream error body to the caller.
+
+ADDED backend/src/core/mailing/mcp_access_granted.py
+  - Reuses the existing send_mail facade, SMTP settings and mailbox provider.
+  - Notification contains the alias, server and environment, never the key.
+  - Reports smtp_accepted, recorded or failed independently of grant success.
+  - Catches mail failures without rolling back or hiding a successful grant.
+
+ADDED backend/src/core/mailing/templates/mcp_access_granted.html
+  - Separate HTML success email, with existing mailer HTML escaping.
+  - Confirmation: "Your MCP server access has been granted for the existing
+    key alias ..." plus server and environment details.
+  - Clearly different TEST variant for mail-only checks.
+
+ADDED backend/src/api/routes/grant_mcp.py
+  - POST /admin/grant-mcp; requires get_current_superuser authentication.
+  - Required inputs: key_alias, mcp_name, environment, recipient_email.
+  - Environment is DEV, TEST, STG or PROD; there is no implicit default.
+  - Validates email, rejects blank/control-character names and unknown fields.
+  - Sends notification only after a successful grant or verified existing access.
+  - Runs blocking mail delivery in a thread, not on the async event loop.
+  - Audit log includes actor username, environment, grant and mail status.
+
+MODIFIED backend/src/api/main.py -- TWO REGISTRATION LINES ONLY
+  A. In the existing "from backend.src.api.routes import (...)" block, add:
+         grant_mcp,
+     directly after batch_keys.
+  B. Immediately after application.include_router(batch_keys.router), add:
+         application.include_router(grant_mcp.router)
+  Merge these two lines into the deployed version if its contents differ;
+  do not replace unrelated production edits with a local copy.
+
+ADDED backend/tests/test_grant_mcp.py
+  - Mock HTTP provider; no live LiteLLM grants and no real SMTP traffic.
+  - Grant/read-back, permission preservation, repeat requests, missing or
+    ambiguous matches, alias policy, network/upstream errors, safe error output,
+    malformed responses, empty update response and missing configuration.
+  - API ordering, no mail on grant failure, independent mail status, validation,
+    unauthenticated/non-superuser rejection, mounted route authentication.
+  - HTML escaping, real mailbox output, mocked SMTP, mail failure handling and
+    explicit TEST labelling. Temporary mailbox files are isolated per test.
+
+ADDED backend/scripts/checks/mcp_grant_mail.py
+  - Mail-only check. NEVER calls LiteLLM or changes permissions.
+  - Default: local preview through the placeholder/mailbox provider.
+  - --send explicitly selects SMTP for THIS SCRIPT PROCESS ONLY.
+  - Default recipient: extern.hamza-hacioglu@allianz.com.tr
+  - Subject/body identify the message as a TEST, not a real access grant.
+
+ADDED MCP-ACCESS-GRANT-CHANGES.txt
+  - This manual handover and change log.
+
+LOCAL DEVELOPMENT ARTIFACT
+  backend/.venv/ was created during the initial test setup attempt and removed
+  before handover. Dependency installation was cancelled; no further installs
+  were attempted. There is no new virtual environment to copy to production.
+  Python syntax checks may also create __pycache__/ files; do not copy them.
+
+3. EXISTING MAIL FLOW AND THE INTEGRATION DECISION
+
+Existing core/mailing/mailer.py renders templates from the adjacent templates
+directory. It escapes template inputs. SMTP uses the existing internal relay
+via smtplib.SMTP; it currently does not use authentication or STARTTLS.
+Existing approval/result emails use the outbox worker in worker/jobs/mail.py.
+Existing batch-key operations also call the shared mailer directly.
+
+This new admin operation follows the direct-mail pattern. There is NO new
+outbox job, durable mail retry, migration or worker registration. After a
+verified grant it attempts mail synchronously before returning HTTP 200.
+If mail fails, the response still states the actual grant status and includes
+notification.status=failed. Retry the same endpoint to retry the notification:
+it will recheck access, skip /key/update if already granted, and send again.
+Repeated successful calls can therefore produce duplicate notifications.
+SMTP acceptance is not proof of delivery into the user's inbox.
+
+4. REQUIRED SETTINGS: REUSE EXISTING PRODUCTION VALUES
+
+LiteLLM:
+  LITELLM_BASE_URL_PROD and LITELLM_MASTER_KEY_PROD for environment=PROD.
+  DEV and STG use the corresponding suffix; TEST maps to DEV as elsewhere.
+  The existing helper falls back independently to LITELLM_BASE_URL and
+  LITELLM_MASTER_KEY if a suffixed value is empty. CHECK BOTH values before
+  deployment so a requested environment cannot unexpectedly use the fallback.
+  No IP address or master credential is hardcoded in the new code.
+  LiteLLM credentials must allow /v1/mcp/server, /key/list, /key/info, /key/update.
+
+Email:
+  MAIL_PROVIDER=smtp for real sending.
+  SMTP_SERVER, SMTP_PORT, SMTP_TIMEOUT, SMTP_SENDER: existing working settings.
+  Existing defaults: mailenable.allianz-tr.local, port 25, timeout 15 seconds.
+  MAIL_PROVIDER=placeholder/jsonfile/none/log writes mailbox files instead.
+  MAIL_SINK_DIR is optional and is also honoured in SMTP mode by the mailer.
+
+No new environment variables or dependencies were added. In production these
+settings must be available to the backend-api process (not only the worker),
+because this route sends from the API process. Use existing secret management;
+do not place real master keys, JWTs or other secrets in this log or in chat.
+
+Per real request, provide the exact existing key alias, exact MCP server name
+or alias, environment, and intended recipient email. The recipient is supplied
+by the authenticated admin; it is NOT automatically verified as the key owner.
+
+5. API CONTRACT AND MANUAL CALL
+
+Direct backend URL: POST /admin/grant-mcp
+Through existing Nginx: POST /api/admin/grant-mcp
+Authorization: Bearer <ORION_SUPERUSER_ACCESS_TOKEN>
+This is the Orion login JWT, NOT the LiteLLM master key.
+Content-Type: application/json
+
+Request example (replace alias/server with real values):
+{
+  "key_alias": "ALZ-BRYSL-EXISTING-KEY",
+  "mcp_name": "existing-mcp-server-name",
+  "environment": "PROD",
+  "recipient_email": "extern.hamza-hacioglu@allianz.com.tr"
+}
+
+HTTP 200 example:
+{
+  "status": "granted",
+  "key_alias": "ALZ-BRYSL-EXISTING-KEY",
+  "mcp_name": "existing-mcp-server-name",
+  "mcp_server_id": "resolved-server-id",
+  "environment": "PROD",
+  "models": [],
+  "notification": {
+    "status": "smtp_accepted",
+    "recipient_email": "extern.hamza-hacioglu@allianz.com.tr"
+  }
+}
+
+status can also be already_granted. notification.status is:
+  smtp_accepted: existing mailer completed its SMTP send without an exception.
+  recorded: local placeholder/mailbox only; NO email was sent.
+  failed: grant succeeded but notification failed; investigate SMTP and retry.
+
+Errors: authentication 401; non-admin or alias policy 403; missing key/server
+404; ambiguous lookup 409; invalid/missing body fields 422; upstream/network/
+verification failure 502; missing LiteLLM configuration 503.
+Grant errors do not trigger success mail. A network/verification error AFTER
+/key/update can mean access changed but was not confirmed; inspect LiteLLM
+before retrying. No rollback/revocation is attempted.
+
+6. DEPLOYMENT AND CHECKS ON AN ACCESSIBLE HOST
+
+Copy the added files and merge the two API registration lines. Rebuild and
+restart backend-api using the normal release process. The existing Dockerfile
+copies backend/ including templates and scripts; no Dockerfile change is needed.
+No migration or frontend deployment is needed for this feature.
+
+From the orion-genai root, in the existing application/test Python environment:
+  python -m pytest -c backend/pytest.ini backend/tests/test_grant_mcp.py -q
+
+Run the existing backend regression suite before production release:
+  python -m pytest -c backend/pytest.ini backend/tests -q
+
+If pytest is absent on that host, use the normal isolated DEV/CI environment
+and backend/requirements-dev.txt. Do not install test tooling into production
+just to run the suite. Tests import existing application dependencies and need
+the repo's runtime requirements too.
+
+Preview email without SMTP, from orion-genai root:
+  python -m backend.scripts.checks.mcp_grant_mail
+  Output is recorded in MAIL_SINK_DIR, or test_env/mailbox by default.
+
+Send one TEST email to the requested address, FROM AN SMTP-ACCESSIBLE PROCESS:
+  python -m backend.scripts.checks.mcp_grant_mail --send
+
+In the deployed container, existing env settings are inherited. Example from
+the deployment directory (after the rebuilt image includes the new files):
+  docker compose exec backend-api python -m backend.scripts.checks.mcp_grant_mail --send
+
+Optional flags: --recipient EMAIL --key-alias ALIAS --mcp-name NAME
+                --environment DEV|TEST|STG|PROD
+These only change TEST email content. They do not grant access.
+Unlike backend/main.py, this module does not automatically load a .env file;
+run inside the configured container or supply settings through the process env.
+The script intentionally overrides MAIL_PROVIDER only inside its own process:
+placeholder by default, smtp with --send. It does not edit deployment settings.
+
+After the mail-only check, use a dedicated existing test key/server to exercise
+the real endpoint, confirm access in LiteLLM, inspect the recipient mailbox,
+then repeat once to verify already_granted without another permission update.
+This endpoint DOES change permissions; do not run the real grant example with
+production keys unless the access change is intended and authorized.
+
+7. VERIFICATION ACTUALLY PERFORMED HERE
+
+PASSED: Python syntax compilation of all added/modified Python files.
+PASSED: Real Orion mail renderer, normal and TEST conditional branches,
+        HTML escaping and absence of unresolved template markers.
+PASSED: Actual new notification helper with temporary mailbox files, expected
+        recipient, TEST labelling, mocked SMTP acceptance, simulated SMTP
+        exceptions and false mailer results. No real network calls were made.
+NOT RUN: pytest grant/API/regression tests. Local Python lacks pytest/httpx/
+         FastAPI; dependency installation was cancelled. No claim is made that
+         these tests passed or that the production endpoint was exercised.
+NOT SENT: live test mail to extern.hamza-hacioglu@allianz.com.tr.
+NOT CHANGED: any live LiteLLM key, production service or production database.
+
+Outstanding release checks are the pytest suite on the normal DEV/CI host,
+the opt-in SMTP test and an intended end-to-end grant on the accessible host.
+Local syntax checks used Python 3.13; the production image uses Python 3.12,
+so run the release tests with the deployment's normal Python version as well.
+
+8. OPERATIONAL NOTES AND ROLLBACK
+
+Keep updates to the SAME virtual key serialized across admin tools/services:
+LiteLLM's read/merge/update sequence does not provide an atomic permission
+append, so concurrent writers can overwrite each other's changes. This
+integration, like the standalone version, does not add cross-process locking.
+The server list and alias-filtered key list use the same provider endpoints
+and response shapes as the known-working standalone implementation.
+
+To roll back the code, remove the two grant_mcp registration lines from
+backend/src/api/main.py and redeploy backend-api. Unreferenced feature files
+can then be removed. Code rollback does NOT revoke grants already made and
+does not undo sent emails. Handle revocation separately through the normal
+LiteLLM administration process if required.

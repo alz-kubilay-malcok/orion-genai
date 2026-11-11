@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GenAi Key Dispatcher - MCP Access</title>
+</head>
+<body style="font-family:Arial,sans-serif;color:#222;background:#f5f6f8;padding:24px;margin:0;">
+  <div style="max-width:640px;margin:0 auto;background:#fff;border:1px solid #e3e6ea;border-radius:8px;overflow:hidden;">
+    <div style="background:#1a8754;color:#fff;padding:18px 24px;font-size:18px;font-weight:600;">GenAi Key Dispatcher</div>
+    <div style="padding:24px;line-height:1.5;">
+      #if test_message
+      <p><strong>TEST NOTIFICATION: No key permissions were changed by this mail test.</strong></p>
+      <p>This is a preview of the MCP access confirmation email.</p>
+      #else
+      <p>Hello,</p>
+      <p>Your MCP server access has been granted for the existing key alias <strong>$key_alias</strong>.</p>
+      #end
+      <table style="border-collapse:collapse;width:100%;table-layout:fixed;overflow-wrap:anywhere;">
+        <tr><th style="text-align:left;padding:8px;border:1px solid #d8dde3;">Key alias</th><td style="padding:8px;border:1px solid #d8dde3;">$key_alias</td></tr>
+        <tr><th style="text-align:left;padding:8px;border:1px solid #d8dde3;">MCP server</th><td style="padding:8px;border:1px solid #d8dde3;">$mcp_name</td></tr>
+        <tr><th style="text-align:left;padding:8px;border:1px solid #d8dde3;">Environment</th><td style="padding:8px;border:1px solid #d8dde3;">$environment</td></tr>
+      </table>
+      <p>Your existing API key remains unchanged. No new key has been generated.</p>
+    </div>
+    <div style="padding:14px 24px;font-size:12px;color:#6c737a;border-top:1px solid #e3e6ea;">Generated automatically at $completed_at.</div>
+  </div>
+</body>
+</html>

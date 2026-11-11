@@ -24,6 +24,7 @@ from backend.src.api.routes import (
     approval_actions,
     auth,
     batch_keys,
+    grant_mcp,
     health,
     internal,
     mcp_catalog,
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     application.include_router(auth.router)
     application.include_router(admin.router)
     application.include_router(batch_keys.router)
+    application.include_router(grant_mcp.router)
     application.include_router(admin_directory.router)
     application.include_router(admin_ldap.router)
     application.include_router(approval_actions.router, prefix="/actions")
