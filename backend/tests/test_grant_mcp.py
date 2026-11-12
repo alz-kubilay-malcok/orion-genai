@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -239,9 +240,44 @@ def test_endpoint_grants_then_notifies(endpoint, provider):
     response = client.post("/admin/grant-mcp", json=BODY)
     assert response.status_code == 200
     assert response.json()["status"] == "granted"
+    assert response.json()["resolved_alias"] == BODY["key_alias"]
     assert response.json()["notification"]["status"] == "smtp_accepted"
     send.assert_called_once()
     assert "private-key-token" not in response.text
+
+
+def test_endpoint_resolves_old_alias_before_grant_and_notification(endpoint, provider, monkeypatch, caplog):
+    client, send = endpoint
+    monkeypatch.setattr(route, "ALIAS_MAPPING", {"old-alias": BODY["key_alias"]})
+    with caplog.at_level(logging.INFO, logger=route.__name__):
+        response = client.post("/admin/grant-mcp", json={**BODY, "key_alias": "old-alias"})
+    assert response.status_code == 200
+    assert response.json()["resolved_alias"] == BODY["key_alias"]
+    assert response.json()["key_alias"] == BODY["key_alias"]
+    send.assert_called_once_with(**BODY)
+    assert f"eski alias \u00e7evrildi: old-alias -> {BODY['key_alias']}" in caplog.text
+
+
+def test_resolved_alias_not_found_preserves_existing_error(endpoint, provider, monkeypatch):
+    client, send = endpoint
+    monkeypatch.setattr(route, "ALIAS_MAPPING", {"old-alias": BODY["key_alias"]})
+    provider["keys"] = []
+    response = client.post("/admin/grant-mcp", json={**BODY, "key_alias": "old-alias"})
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Key alias not found"
+    send.assert_not_called()
+
+
+def test_resolve_unknown_alias_is_unchanged(monkeypatch):
+    monkeypatch.setattr(route, "ALIAS_MAPPING", {"old-alias": "new-alias"})
+    assert route.resolve_alias("already-new") == "already-new"
+
+
+def test_static_alias_mapping_is_available_without_startup():
+    original = "ALZ-YARDIM-MASASI-CEMENC351-PROD-ALLIANZ-CODER"
+    resolved = "ALZ-YRDM-MSS-BRYSL-CEMENC351-COPILOT-CODER"
+    assert route.resolve_alias(original) == resolved
+    assert route.resolve_alias(resolved) == resolved
 
 
 @pytest.mark.parametrize("error", ["verify", "upstream", "alias", "server", "key"])
