@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 from types import SimpleNamespace
@@ -9,7 +11,6 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from backend.src.api.auth.dependencies import get_current_superuser, get_current_user
 from backend.src.api.main import create_app
 from backend.src.api.routes import grant_mcp as route
 from backend.src.core.litellm import grant_mcp as service
@@ -222,7 +223,7 @@ def test_malformed_permissions_never_update(provider):
 def endpoint(monkeypatch):
     app = FastAPI()
     app.include_router(route.router)
-    app.dependency_overrides[get_current_superuser] = lambda: SimpleNamespace(username="admin")
+    app.dependency_overrides[route._grant_actor] = lambda: "admin"
     send = Mock(return_value="smtp_accepted")
     monkeypatch.setattr(route, "send_mcp_access_granted", send)
     return TestClient(app), send
@@ -342,30 +343,97 @@ def test_explicit_target_and_recipient_required(endpoint, field):
 def test_unauthenticated_request_is_rejected(monkeypatch):
     app = FastAPI()
     app.include_router(route.router)
-
-    async def anonymous_user():
-        raise HTTPException(401, "Authentication required")
-
-    app.dependency_overrides[get_current_user] = anonymous_user
     grant_mock = AsyncMock()
     monkeypatch.setattr(route, "grant_mcp_access", grant_mock)
     assert TestClient(app).post("/admin/grant-mcp", json=BODY).status_code == 401
     grant_mock.assert_not_called()
 
 
-def test_non_superuser_cannot_grant(monkeypatch):
+@pytest.mark.parametrize("is_superuser,expected", [(True, 200), (False, 403)])
+def test_bearer_superuser_requirement_is_preserved(monkeypatch, is_superuser, expected):
     app = FastAPI()
     app.include_router(route.router)
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(is_superuser=False)
+    app.state.container = SimpleNamespace(session_factory=Mock(return_value=AsyncMock()))
+    monkeypatch.setattr(route, "get_current_user", AsyncMock(return_value=SimpleNamespace(
+        username="admin", is_superuser=is_superuser,
+    )))
+    grant_mock = AsyncMock(return_value={"status": "granted", "key_alias": BODY["key_alias"]})
+    send = Mock(return_value="smtp_accepted")
+    monkeypatch.setattr(route, "send_mcp_access_granted", send)
+    monkeypatch.setattr(route, "grant_mcp_access", grant_mock)
+    response = TestClient(app).post(
+        "/admin/grant-mcp", json=BODY, headers={"Authorization": "Bearer example-token"},
+    )
+    assert response.status_code == expected
+    if is_superuser:
+        grant_mock.assert_awaited_once()
+        send.assert_called_once()
+    else:
+        grant_mock.assert_not_called()
+        send.assert_not_called()
+
+
+def test_invalid_bearer_token_is_rejected(monkeypatch):
+    app = FastAPI()
+    app.include_router(route.router)
+    app.state.container = SimpleNamespace(session_factory=Mock(return_value=AsyncMock()))
+    monkeypatch.setattr(route, "get_current_user", AsyncMock(side_effect=HTTPException(401, "Invalid token")))
     grant_mock = AsyncMock()
     monkeypatch.setattr(route, "grant_mcp_access", grant_mock)
-    assert TestClient(app).post("/admin/grant-mcp", json=BODY).status_code == 403
+    response = TestClient(app).post(
+        "/admin/grant-mcp", json=BODY, headers={"Authorization": "Bearer invalid-token"},
+    )
+    assert response.status_code == 401
     grant_mock.assert_not_called()
 
 
-def test_application_registers_protected_endpoint():
+@pytest.fixture
+def signed_endpoint(monkeypatch):
+    monkeypatch.setenv("GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE", "hmac")
+    monkeypatch.setenv("GENAI_ORION_PANEL_WEBHOOK_SECRET", "test-orion-secret")
+    app = FastAPI()
+    app.include_router(route.router)
+    send = Mock(return_value="smtp_accepted")
+    monkeypatch.setattr(route, "send_mcp_access_granted", send)
+    body = json.dumps(BODY).encode("utf-8")
+    signature = hmac.new(b"test-orion-secret", body, hashlib.sha256).hexdigest()
+    headers = {"Content-Type": "application/json", "X-GenAi-Orion-Panel-Signature": signature}
+    return TestClient(app), send, body, headers
+
+
+def test_signed_integration_grants_without_login(signed_endpoint, provider):
+    client, send, body, headers = signed_endpoint
+    response = client.post("/admin/grant-mcp", content=body, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["resolved_alias"] == BODY["key_alias"]
+    send.assert_called_once_with(**BODY)
+    assert len(provider["updates"]) == 1
+
+
+@pytest.mark.parametrize("problem", ["invalid", "empty", "tampered", "missing_secret", "disabled"])
+def test_invalid_integration_auth_never_grants_or_mails(signed_endpoint, monkeypatch, problem):
+    client, send, body, headers = signed_endpoint
+    if problem == "invalid":
+        headers["X-GenAi-Orion-Panel-Signature"] = "bad-signature"
+    elif problem == "empty":
+        headers["X-GenAi-Orion-Panel-Signature"] = ""
+    elif problem == "tampered":
+        body += b" "
+    elif problem == "missing_secret":
+        monkeypatch.delenv("GENAI_ORION_PANEL_WEBHOOK_SECRET")
+    else:
+        monkeypatch.setenv("GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE", "off")
+    grant_mock = AsyncMock()
+    monkeypatch.setattr(route, "grant_mcp_access", grant_mock)
+    response = client.post("/admin/grant-mcp", content=body, headers=headers)
+    assert response.status_code == (503 if problem in {"missing_secret", "disabled"} else 401)
+    grant_mock.assert_not_called()
+    send.assert_not_called()
+
+
+def test_application_registers_endpoint_with_unchanged_request_contract():
     operation = create_app().openapi()["paths"]["/admin/grant-mcp"]["post"]
-    assert operation["security"] == [{"HTTPBearer": []}]
+    assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("/GrantMcpBody")
 
 
 def test_notification_template_escapes_alias_and_has_no_unresolved_markers():

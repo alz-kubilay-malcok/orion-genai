@@ -1,21 +1,44 @@
-"""Admin-only MCP grants for existing LiteLLM key aliases."""
+"""MCP grants authenticated by an admin token or Orion webhook signature."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel, ConfigDict, EmailStr, StringConstraints
 
-from backend.src.api.auth.dependencies import get_current_superuser
+from backend.src.api.auth.dependencies import get_current_superuser, get_current_user
 from backend.src.api.routes.grant_mcp_aliases import ALIAS_MAPPING
+from backend.src.api.routes.orion_webhook import webhook_signature_failure
 from backend.src.core.litellm.grant_mcp import McpGrantError, grant_mcp_access
 from backend.src.core.mailing.mcp_access_granted import send_mcp_access_granted
-from backend.src.data.db.models import User
 
 logger = logging.getLogger(__name__)
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def _grant_actor(request: Request) -> str:
+    if "x-genai-orion-panel-signature" in request.headers:
+        secret = os.getenv("GENAI_ORION_PANEL_WEBHOOK_SECRET", "").strip()
+        mode = os.getenv("GENAI_ORION_PANEL_WEBHOOK_AUTH_MODE", "hmac").strip().lower()
+        if not secret or mode != "hmac":
+            raise HTTPException(503, "Orion webhook authentication is not configured for MCP grants")
+        rejected = webhook_signature_failure(request, await request.body())
+        if rejected is not None:
+            raise HTTPException(401, "INVALID_WEBHOOK_SIGNATURE")
+        return "orion-integration"
+
+    credentials = await _bearer_scheme(request)
+    if credentials is None:
+        raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Bearer"})
+    async with request.app.state.container.session_factory() as session:
+        user = await get_current_user(request, credentials=credentials, session=session)
+        user = await get_current_superuser(user)
+        return user.username
 
 
 def resolve_alias(alias: str) -> str:
@@ -44,7 +67,7 @@ class GrantMcpBody(BaseModel):
 @router.post("/grant-mcp")
 async def grant_mcp(
     body: GrantMcpBody,
-    user: Annotated[User, Depends(get_current_superuser)],
+    actor: Annotated[str, Depends(_grant_actor)],
 ) -> dict[str, object]:
     resolved_alias = resolve_alias(body.key_alias)
     try:
@@ -60,7 +83,7 @@ async def grant_mcp(
     )
     logger.info(
         "MCP grant completed by=%s environment=%s status=%s notification=%s",
-        user.username, body.environment, result["status"], notification_status,
+        actor, body.environment, result["status"], notification_status,
     )
     return {
         **result,
