@@ -332,12 +332,20 @@ def test_invalid_body_never_grants_or_mails(endpoint, monkeypatch, changes):
     send.assert_not_called()
 
 
-@pytest.mark.parametrize("field", ["environment", "recipient_email"])
-def test_explicit_target_and_recipient_required(endpoint, field):
+def test_omitted_recipient_email_is_rejected(endpoint):
     client, send = endpoint
-    body = {name: value for name, value in BODY.items() if name != field}
+    body = {name: value for name, value in BODY.items() if name != "recipient_email"}
     assert client.post("/admin/grant-mcp", json=body).status_code == 422
     send.assert_not_called()
+
+
+def test_environment_defaults_to_prod(endpoint, provider):
+    client, send = endpoint
+    body = {name: value for name, value in BODY.items() if name != "environment"}
+    response = client.post("/admin/grant-mcp", json=body)
+    assert response.status_code == 200
+    assert response.json()["environment"] == "PROD"
+    send.assert_called_once()
 
 
 def test_unauthenticated_request_is_rejected(monkeypatch):

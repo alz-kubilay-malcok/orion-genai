@@ -60,7 +60,7 @@ class GrantMcpBody(BaseModel):
 
     key_alias: GrantName
     mcp_name: GrantName
-    environment: Literal["DEV", "TEST", "STG", "PROD"]
+    environment: Literal["DEV", "TEST", "STG", "PROD"] = "PROD"
     recipient_email: EmailStr
 
 
