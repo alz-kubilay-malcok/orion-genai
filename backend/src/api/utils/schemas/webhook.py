@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, field_validator, model_validator
 
 from backend.src.core.mcp_scopes import McpScope, normalize_scopes
+from backend.src.core.naming import is_bireysel_environment, is_copilot_purpose
 
 TALEP_TURU_MAPPING: dict[str, str] = {
     "litellm_api_anahtari": "litellm_key",
@@ -42,6 +43,13 @@ class LitellmKeyPayload(SharedFields):
     maksimum_es_zamanli_istek: int | None = None
     ortalama_girdi_sayfasi: float | None = None
     ortalama_cikti_sayfasi: float | None = None
+
+    @model_validator(mode="after")
+    def _copilot_requires_bireysel(self) -> LitellmKeyPayload:
+        if is_copilot_purpose(self.kullanim_amaci) and not is_bireysel_environment(self.ortam):
+            msg = "COPILOT amacı sadece ortam BIREYSEL iken seçilebilir"
+            raise ValueError(msg)
+        return self
 
 
 class McpErisim(BaseModel):

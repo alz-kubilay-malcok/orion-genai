@@ -168,3 +168,25 @@ def test_provision_source_registers_only_litellm():
     source = inspect.getsource(provision_module._provision_credential)
     assert "register_roster_member" in source
     assert 'if kind == "litellm"' in source
+
+
+def test_roster_disabled_by_env(monkeypatch):
+    monkeypatch.setenv("COPILOT_ROSTER_BASE_URL", "http://roster.test")
+    monkeypatch.setenv("COPILOT_ROSTER_ADMIN_TOKEN", "token")
+    monkeypatch.setenv("COPILOT_ROSTER_ENABLED", "false")
+
+    called = False
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            nonlocal called
+            called = True
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    ok = asyncio.run(
+        register_roster_member(
+            api_key="sk-secret", full_name="Ali", team_id="GENAI",
+        )
+    )
+    assert ok is False
+    assert called is False

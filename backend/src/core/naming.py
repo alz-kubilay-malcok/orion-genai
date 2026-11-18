@@ -39,6 +39,10 @@ _PURPOSE_TOKENS = {
     "DIGERI": "OTHER",
     "KUBEFLOW": "KUBEFLOW",
     "CODER": "CODER",
+    "COPILOT": "COPILOT_CODER",
+    "COPILOT_CODER": "COPILOT_CODER",
+    "COPILOT-CODER": "COPILOT_CODER",
+    "COPILOTCODER": "COPILOT_CODER",
     "IDP": "IDP",
     "CHATBOT": "CHATBOT",
     "AGENTIC": "AGENTIC",
@@ -73,6 +77,20 @@ def _bound(alias: str) -> str:
 def _is_bireysel(environment: object) -> bool:
     token = "".join(ch for ch in _fold(environment) if ch.isalnum())
     return token in _BIREYSEL_ENVS
+
+
+COPILOT_PURPOSE = "COPILOT_CODER"
+# Alias'ta tire yerine alt çizgiyle korunan purpose token'ları.
+_UNDERSCORE_PURPOSES = frozenset({COPILOT_PURPOSE})
+
+
+def is_bireysel_environment(environment: object) -> bool:
+    return _is_bireysel(environment)
+
+
+def is_copilot_purpose(purpose: object) -> bool:
+    """``COPILOT`` / ``COPILOT_CODER`` (veya tire/bitişik yazım) → True."""
+    return _PURPOSE_TOKENS.get(_fold(purpose)) == COPILOT_PURPOSE
 
 
 _NON_ALNUM = re.compile(r"[^A-Z0-9]+")
@@ -125,7 +143,7 @@ def build_litellm_key_alias(
     """Yeni LiteLLM alias. Bireyselde ortam yerine ``BRYSL-{ISIM}`` yazılır."""
     dept = _segment(department)
     proj = _project_segment(project)
-    purp = _segment(purpose)
+    purp = purpose if purpose in _UNDERSCORE_PURPOSES else _segment(purpose)
     if _is_bireysel(environment):
         parts = ("ALZ", dept, "BRYSL", _segment(person), proj, purp)
     else:

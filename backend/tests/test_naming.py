@@ -117,3 +117,37 @@ def test_mcp_alias_unchanged():
         "mcp_key",
     )
     assert via_request == alias
+
+
+def test_copilot_purpose_alias_and_bireysel_validation():
+    import pytest
+    from pydantic import ValidationError
+
+    from backend.src.api.utils.schemas.webhook import LitellmKeyPayload
+
+    assert litellm_purpose_token("COPILOT") == "COPILOT_CODER"
+    alias = key_alias_for_request(
+        {
+            "request_type": "litellm_key",
+            "department_name": "GENAI",
+            "environment": "BIREYSEL",
+            "project_name": "Knime",
+            "purpose_code": "COPILOT",
+            "requester_name": "Ali Veli",
+            "genai_orion_panel_ticket_id": "HD-9",
+        }
+    )
+    assert alias == "ALZ-GENAI-BRYSL-ALI-VELI-KNIME-COPILOT_CODER"
+
+    base = {
+        "talep_turu": "litellm_api_anahtari",
+        "talep_no": "ITSM-1",
+        "talep_url": "https://example.com/x",
+        "talep_eden_adi": "Ali Veli",
+        "talep_eden_eposta": "ali@example.com",
+        "olusturulma_tarihi": "2026-11-18T10:00:00Z",
+        "kullanim_amaci": "COPILOT",
+    }
+    LitellmKeyPayload.model_validate({**base, "ortam": "BIREYSEL"})
+    with pytest.raises(ValidationError):
+        LitellmKeyPayload.model_validate({**base, "ortam": "DEV"})

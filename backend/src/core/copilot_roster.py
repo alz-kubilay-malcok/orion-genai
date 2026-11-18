@@ -2,6 +2,7 @@
 
 ``POST {COPILOT_ROSTER_BASE_URL}/roster``
 Başlık: ``X-Admin-Token``. Ham anahtar serviste SHA-256'ya çevrilir.
+``COPILOT_ROSTER_ENABLED=false`` ile kapatılır (varsayılan açık).
 URL veya token boşsa no-op. Ağ / HTTP hatası anahtar üretimini düşürmez.
 """
 
@@ -23,6 +24,12 @@ def _admin_token() -> str:
     return (os.getenv("COPILOT_ROSTER_ADMIN_TOKEN") or "").strip()
 
 
+def _enabled() -> bool:
+    """``COPILOT_ROSTER_ENABLED`` — varsayılan açık; false/0/no/off ile kapanır."""
+    raw = (os.getenv("COPILOT_ROSTER_ENABLED") or "true").strip().lower()
+    return raw not in {"false", "0", "no", "off"}
+
+
 async def register_roster_member(
     *,
     api_key: str,
@@ -34,6 +41,9 @@ async def register_roster_member(
 
     Başarıda ``True``. Atlanırsa veya hata olursa ``False``; exception yükselmez.
     """
+    if not _enabled():
+        logger.info("copilot roster skipped: COPILOT_ROSTER_ENABLED=false")
+        return False
     key = (api_key or "").strip()
     name = (full_name or "").strip()
     team = (team_id or "").strip()

@@ -33,7 +33,9 @@ TALEP_EDEN_EPOSTA = ""
 DEPARTMAN_ADI = "[Veri Bilimi]"
 ORTAM = "BIREYSEL"  # DEV | STG | PROD | BIREYSEL
 PROJE_ADI = "genai-management"
-KULLANIM_AMACI = "IDP"  # CODER | IDP | CHATBOT | AGENTIC | KUBEFLOW | OTHER
+# CODER | COPILOT | IDP | CHATBOT | AGENTIC | KUBEFLOW | OTHER
+# COPILOT sadece ORTAM = "BIREYSEL" iken kabul edilir (alias sonu: COPILOT_CODER).
+KULLANIM_AMACI = "IDP"
 MODELLER = ["allianz-vision"]
 TALEP_ACIKLAMASI = "test"
 KULLANIM_SENARYOSU = "test"
@@ -77,6 +79,8 @@ def main() -> int:
     if not WEBHOOK_URL:
         print("WEBHOOK_URL boş; script'in üstündeki ayarları doldur.")
         return 2
+    if KULLANIM_AMACI.strip().upper().startswith("COPILOT") and ORTAM.strip().upper() != "BIREYSEL":
+        print("UYARI: COPILOT sadece ORTAM=BIREYSEL ile kabul edilir; sunucu 422 dönecek.")
 
     body = json.dumps(build_payload(), ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json"}

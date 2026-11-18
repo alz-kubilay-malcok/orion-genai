@@ -212,7 +212,7 @@ async def receive_orion_webhook(
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"error_code": "VALIDATION_ERROR",
-                     "field_errors": exc.errors()},
+                     "field_errors": exc.errors(include_context=False, include_url=False)},
         )
 
     try:

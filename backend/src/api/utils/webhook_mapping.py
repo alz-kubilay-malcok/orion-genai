@@ -118,6 +118,12 @@ def payload_to_request_fields(
         }:
             continue
         fields[snakecase] = v
+    # Orion "girilmedi" değerini 0 olarak gönderebiliyor; DB check constraint'leri
+    # (max_concurrent_requests >= 1, estimated_daily_requests > 0) 0'ı reddeder.
+    for positive_field in ("max_concurrent_requests", "estimated_daily_requests"):
+        value = fields.get(positive_field)
+        if value is not None and value <= 0:
+            fields[positive_field] = None
     if "environment" in fields:
         fields["environment"] = _normalize_environment(fields.get("environment"))
     if "repo_platform" in fields:

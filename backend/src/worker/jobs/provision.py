@@ -140,6 +140,10 @@ async def _provision_credential(
             "request_id": str(request_id),
             "ticket": row.genai_orion_panel_ticket_id,
         }
+        full_project_name = (getattr(row, "project_name", None) or "").strip()
+        if full_project_name:
+            # Alias'ta 15 karaktere kısalan proje adının tam hali.
+            metadata["project_name"] = full_project_name
         litellm_log.info(
             "LiteLLM POST %s",
             url,

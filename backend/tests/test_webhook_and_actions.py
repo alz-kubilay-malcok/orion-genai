@@ -167,3 +167,27 @@ def test_revise_only_litellm():
     assert ApprovalAction.REVISE in VALID_ACTIONS_BY_TYPE[RequestType.LITELLM_KEY]
     assert ApprovalAction.REVISE not in VALID_ACTIONS_BY_TYPE[RequestType.MCP_KEY]
     assert ApprovalAction.REVISE not in VALID_ACTIONS_BY_TYPE[RequestType.MCP_SERVER_REGISTRY]
+
+
+def test_zero_concurrency_and_daily_requests_mapped_to_none():
+    from backend.src.api.utils.schemas.webhook import LitellmKeyPayload
+    from backend.src.api.utils.webhook_mapping import payload_to_request_fields
+
+    raw = {
+        "talep_turu": "litellm_api_anahtari",
+        "talep_no": "ITSM-117405",
+        "talep_url": "https://example.com/x",
+        "talep_eden_adi": "Ali Veli",
+        "talep_eden_eposta": "ali@example.com",
+        "olusturulma_tarihi": "1794989171720",
+        "ortam": "DEV",
+        "proje_adi": "PMC Common Platform Services",
+        "kullanim_amaci": "AGENTIC",
+        "maksimum_es_zamanli_istek": 0,
+        "tahmini_gunluk_istek": 0,
+    }
+    payload = LitellmKeyPayload.model_validate(raw)
+    fields = payload_to_request_fields(payload, request_type="litellm_key", raw=raw)
+    assert fields["max_concurrent_requests"] is None
+    assert fields["estimated_daily_requests"] is None
+    assert fields["project_name"] == "PMC Common Platform Services"
